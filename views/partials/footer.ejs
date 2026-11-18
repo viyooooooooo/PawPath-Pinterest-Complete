@@ -5,8 +5,7 @@
   </footer>
   <script src="/js/main.js"></script>
   <% if (typeof mapAssets !== 'undefined' && mapAssets) { %>
-    <script src="https://unpkg.com/maplibre-gl@6.19.0/dist/maplibre-gl.js"></script>
-    <script src="/js/map.js"></script>
+    <script type="module" src="/js/map.js"></script>
   <% } %>
   <% if (typeof exploreAssets !== 'undefined' && exploreAssets) { %><script src="/js/explore.js"></script><% } %>
 </body>

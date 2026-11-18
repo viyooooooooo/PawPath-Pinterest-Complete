@@ -1,6 +1,25 @@
-(() => {
+(async () => {
   const mapElements = [...document.querySelectorAll('[data-paw-map]')];
   if (!mapElements.length) return;
+  let maplibregl;
+  const moduleUrls = [
+    'https://unpkg.com/maplibre-gl@6.19.0/dist/maplibre-gl.mjs',
+    'https://cdn.jsdelivr.net/npm/maplibre-gl@6.19.0/dist/maplibre-gl.mjs'
+  ];
+  for (const moduleUrl of moduleUrls) {
+    try {
+      maplibregl = await import(moduleUrl);
+      break;
+    } catch (error) {
+      // Try the next CDN when a provider is temporarily unavailable.
+    }
+  }
+  if (!maplibregl) {
+    document.querySelectorAll('[data-map-loading]').forEach((node) => {
+      node.textContent = 'The interactive map could not load. Check your connection and refresh.';
+    });
+    return;
+  }
   const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
   const dataPromise = fetch('/api/map-data').then((response) => {
     if (!response.ok) throw new Error('Map data could not be loaded.');
@@ -105,10 +124,6 @@
           if (!feature) return;
           new maplibregl.Popup({ offset: 14, maxWidth: '270px' }).setLngLat(feature.geometry.coordinates).setHTML(pointPopup(feature.properties)).addTo(map);
         });
-        ['pawpath-clusters', 'pawpath-points'].forEach((layer) => {
-          map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
-          map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
-        });
       }
       render(false);
       document.querySelectorAll('[data-map-loading]').forEach((node) => node.classList.add('is-hidden'));
@@ -142,7 +157,6 @@
     return state;
   }
 
-  if (typeof maplibregl === 'undefined') { document.querySelectorAll('[data-map-loading]').forEach((node) => { node.textContent = 'The interactive map could not load. Refresh to try again.'; }); return; }
   dataPromise.then((payload) => mapElements.forEach((element) => initMap(element, payload))).catch((error) => { document.querySelectorAll('[data-map-loading]').forEach((node) => { node.textContent = error.message; }); });
 
   const story = document.querySelector('[data-map-story]');

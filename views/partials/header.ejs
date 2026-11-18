@@ -21,7 +21,7 @@
   <% } %>
   <% if (typeof exploreAssets !== 'undefined' && exploreAssets) { %><link rel="stylesheet" href="/css/explore-motion.css"><% } %>
 </head>
-<body class="<%= typeof exploreAssets !== 'undefined' && exploreAssets ? 'explore-experience' : '' %>">
+<body class="<%= typeof exploreAssets !== 'undefined' && exploreAssets ? 'explore-experience' : '' %><%= typeof mapAssets !== 'undefined' && mapAssets ? ' map-experience' : '' %>">
   <header class="site-header">
     <a class="brand" href="/"><img class="brand-mark" src="/images/pawpath-mark.svg" alt=""><span>PawPath</span></a>
     <nav class="main-nav" aria-label="Primary navigation">
