@@ -1,0 +1,87 @@
+<%- include('partials/header') %>
+<section class="form-page wide-form">
+  <div class="form-intro">
+    <span class="kicker">FAST, KIND LISTING</span>
+    <h1><%= formTitle %></h1>
+    <p>Only a name and location are needed. Add details whenever you have them—especially useful during an SOS.</p>
+  </div>
+  <form class="main-form" method="post" action="<%= action %>" enctype="multipart/form-data">
+    <% if (errors.length) { %><div class="form-errors"><ul><% errors.forEach(error => { %><li><%= error %></li><% }) %></ul></div><% } %>
+
+    <div class="form-section">
+      <h2>Photo <small class="optional-label">Optional</small></h2>
+      <p class="form-note">A clear photo helps people recognise the animal. Choose one option—your photo stays with this listing after refresh.</p>
+      <div class="photo-picker">
+        <label class="photo-choice photo-choice-primary">Take Photo
+          <input id="take-photo" name="photo" type="file" accept="image/*" capture="environment">
+          <span>Open camera</span>
+        </label>
+        <label class="photo-choice">Choose from Gallery
+          <input id="gallery-photo" name="photo" type="file" accept="image/*">
+          <span>Choose a photo or file</span>
+        </label>
+      </div>
+      <div id="photo-preview-wrap" class="photo-preview-wrap <%= animal.photo_url ? 'has-photo' : '' %>">
+        <img id="photo-preview" src="<%= animal.photo_url || '' %>" alt="Selected animal preview">
+        <div class="photo-placeholder" id="photo-placeholder">No photograph selected yet</div>
+        <button class="text-button danger-button" id="remove-photo" type="button">Remove photo</button>
+      </div>
+      <input id="remove-photo-input" type="hidden" name="remove_photo" value="">
+    </div>
+
+    <div class="form-section">
+      <h2>The essentials</h2>
+      <div class="form-grid">
+        <label>Animal's name <span class="required-mark">Required</span><input name="name" required value="<%= animal.name || '' %>" placeholder="Unknown is completely okay"></label>
+        <label>Location <span class="required-mark">Required</span><input name="locality" required value="<%= animal.locality || '' %>" placeholder="Area, landmark or neighbourhood"></label>
+        <label>Listing type <select name="category"><option <%= animal.category === 'Up for Adoption' ? 'selected' : '' %>>Up for Adoption</option><option <%= animal.category === 'Urgent Foster Needed' ? 'selected' : '' %>>Urgent Foster Needed</option><option <%= animal.category === 'Community Feeder Spot' ? 'selected' : '' %>>Community Feeder Spot</option></select></label>
+        <label>Urgency <select name="urgency"><option <%= animal.urgency === 'Normal' ? 'selected' : '' %>>Normal</option><option <%= animal.urgency === 'Needs Help Today' ? 'selected' : '' %>>Needs Help Today</option><option <%= animal.urgency === 'Critical' ? 'selected' : '' %>>Critical</option></select></label>
+        <input type="hidden" name="status" value="<%= animal.status || 'Reported' %>">
+      </div>
+    </div>
+
+    <details class="optional-details" open>
+      <summary>Animal details <span>All optional</span></summary>
+      <div class="form-grid optional-grid">
+        <label>Species <select name="species"><option value="">Unknown</option><option <%= animal.species === 'Dog' ? 'selected' : '' %>>Dog</option><option <%= animal.species === 'Cat' ? 'selected' : '' %>>Cat</option><option <%= animal.species === 'Other' ? 'selected' : '' %>>Other</option></select></label>
+        <label>Age <input name="age" value="<%= animal.age && animal.age !== 'Unknown' ? animal.age : '' %>" placeholder="e.g. approx. 2 years"></label>
+        <label>Breed <input name="colour" value="<%= animal.colour && animal.colour !== 'Not added' ? animal.colour : '' %>" placeholder="e.g. Indie / mixed breed"></label>
+        <label>Gender <select name="gender"><option value="">Unknown</option><option <%= animal.gender === 'Female' ? 'selected' : '' %>>Female</option><option <%= animal.gender === 'Male' ? 'selected' : '' %>>Male</option></select></label>
+        <label>Size <select name="size"><option value="">Unknown</option><option <%= animal.size === 'Small' ? 'selected' : '' %>>Small</option><option <%= animal.size === 'Medium' ? 'selected' : '' %>>Medium</option><option <%= animal.size === 'Large' ? 'selected' : '' %>>Large</option></select></label>
+        <label>Temperament <input name="temperament" value="<%= animal.temperament && animal.temperament !== 'Not added' ? animal.temperament : '' %>" placeholder="e.g. calm, shy, friendly"></label>
+        <label>Vaccination status <select name="vaccinated"><option value="">Unknown</option><option <%= animal.vaccinated === 'Yes' ? 'selected' : '' %>>Yes</option><option <%= animal.vaccinated === 'No' ? 'selected' : '' %>>No</option></select></label>
+        <label>Sterilisation status <select name="sterilised"><option value="">Unknown</option><option <%= animal.sterilised === 'Yes' ? 'selected' : '' %>>Yes</option><option <%= animal.sterilised === 'No' ? 'selected' : '' %>>No</option></select></label>
+      </div>
+    </details>
+
+    <details class="optional-details">
+      <summary>Care notes and contact <span>All optional</span></summary>
+      <div class="form-grid optional-grid">
+        <label class="full-width">Medical condition or care note<textarea name="medical_notes" rows="3" placeholder="Injury, medication, recent treatment or anything helpers should know."><%= animal.medical_notes || '' %></textarea></label>
+        <label class="full-width">Description<textarea name="description" rows="4" placeholder="What happened and what support would help?"><%= animal.description && animal.description !== 'No description added yet.' ? animal.description : '' %></textarea></label>
+        <label class="full-width">Contact details or extra information<textarea name="contact_details" rows="2" placeholder="Optional—share only a safe way for people to reach you."><%= animal.contact_details || '' %></textarea></label>
+      </div>
+    </details>
+    <p class="form-note">Photo files up to 4 MB are accepted. PawPath never asks you to add an image URL.</p>
+    <button class="button" type="submit"><%= animal.id ? 'Save changes' : 'Publish listing' %></button>
+  </form>
+</section>
+<script>
+  (() => {
+    const inputs = [document.getElementById('take-photo'), document.getElementById('gallery-photo')];
+    const preview = document.getElementById('photo-preview');
+    const wrap = document.getElementById('photo-preview-wrap');
+    const placeholder = document.getElementById('photo-placeholder');
+    const remove = document.getElementById('remove-photo');
+    const removeInput = document.getElementById('remove-photo-input');
+    inputs.forEach((input, index) => input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      inputs.forEach((other, otherIndex) => { if (otherIndex !== index) other.value = ''; });
+      preview.src = URL.createObjectURL(file); wrap.classList.add('has-photo'); removeInput.value = '';
+    }));
+    remove.addEventListener('click', () => { inputs.forEach((input) => { input.value = ''; }); preview.removeAttribute('src'); wrap.classList.remove('has-photo'); removeInput.value = 'on'; });
+    if (!preview.getAttribute('src')) wrap.classList.remove('has-photo');
+  })();
+</script>
+<%- include('partials/footer') %>

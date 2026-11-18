@@ -1,0 +1,224 @@
+const fs = require('fs');
+const path = require('path');
+
+const usingPostgres = Boolean(process.env.DATABASE_URL);
+let sqliteDb;
+let pool;
+
+if (usingPostgres) {
+  const { Pool } = require('pg');
+  pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
+} else {
+  const sqlite3 = require('sqlite3').verbose();
+  const dataDirectory = path.join(__dirname, 'data');
+  fs.mkdirSync(dataDirectory, { recursive: true });
+  sqliteDb = new sqlite3.Database(path.join(dataDirectory, 'pawpath.db'));
+  sqliteDb.run('PRAGMA foreign_keys = ON');
+}
+
+function postgresSql(sql) {
+  let index = 0;
+  return sql.replace(/\?/g, () => `$${++index}`).replace(/INTEGER PRIMARY KEY AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+}
+
+const run = async (sql, params = []) => {
+  if (usingPostgres) {
+    let query = postgresSql(sql);
+    if (/^\s*INSERT\s+INTO/i.test(query) && !/\bRETURNING\b/i.test(query)) query += ' RETURNING id';
+    const result = await pool.query(query, params);
+    return { id: result.rows[0]?.id, changes: result.rowCount };
+  }
+  return new Promise((resolve, reject) => sqliteDb.run(sql, params, function onRun(error) {
+    if (error) reject(error); else resolve({ id: this.lastID, changes: this.changes });
+  }));
+};
+
+const get = async (sql, params = []) => {
+  if (usingPostgres) return (await pool.query(postgresSql(sql), params)).rows[0];
+  return new Promise((resolve, reject) => sqliteDb.get(sql, params, (error, row) => error ? reject(error) : resolve(row)));
+};
+
+const all = async (sql, params = []) => {
+  if (usingPostgres) return (await pool.query(postgresSql(sql), params)).rows;
+  return new Promise((resolve, reject) => sqliteDb.all(sql, params, (error, rows) => error ? reject(error) : resolve(rows)));
+};
+
+async function addColumn(table, definition) {
+  try { await run(`ALTER TABLE ${table} ADD COLUMN ${definition}`); } catch (error) {
+    if (!/duplicate column|already exists/i.test(error.message)) throw error;
+  }
+}
+
+async function allowGeneralConversations() {
+  if (usingPostgres) {
+    await run('ALTER TABLE conversations ALTER COLUMN listing_id DROP NOT NULL');
+    return;
+  }
+  const columns = await all('PRAGMA table_info(conversations)');
+  const listingColumn = columns.find((column) => column.name === 'listing_id');
+  if (!listingColumn || Number(listingColumn.notnull) !== 1) return;
+
+  // SQLite cannot remove a NOT NULL constraint in place, so rebuild these two
+  // small related tables once while preserving every existing chat and message.
+  await run('PRAGMA foreign_keys = OFF');
+  await run(`CREATE TABLE conversations_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, listing_id INTEGER,
+    initiator_id INTEGER NOT NULL, recipient_id INTEGER NOT NULL,
+    compatibility_score INTEGER NOT NULL DEFAULT 0, topic TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(listing_id, initiator_id, recipient_id),
+    FOREIGN KEY (listing_id) REFERENCES animals(id) ON DELETE CASCADE,
+    FOREIGN KEY (initiator_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  await run('INSERT INTO conversations_new (id,listing_id,initiator_id,recipient_id,compatibility_score,topic,created_at,updated_at) SELECT id,listing_id,initiator_id,recipient_id,compatibility_score,topic,created_at,updated_at FROM conversations');
+  await run(`CREATE TABLE messages_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL,
+    sender_id INTEGER NOT NULL, body TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (conversation_id) REFERENCES conversations_new(id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  await run('INSERT INTO messages_new (id,conversation_id,sender_id,body,created_at) SELECT id,conversation_id,sender_id,body,created_at FROM messages');
+  await run('DROP TABLE messages');
+  await run('DROP TABLE conversations');
+  await run('ALTER TABLE conversations_new RENAME TO conversations');
+  await run('ALTER TABLE messages_new RENAME TO messages');
+  await run('PRAGMA foreign_keys = ON');
+}
+
+async function initialiseDatabase() {
+  await run(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'Community member', bio TEXT, locality TEXT,
+    profile_photo TEXT, verification_status TEXT NOT NULL DEFAULT 'Unverified', verified_at TEXT, is_admin INTEGER NOT NULL DEFAULT 0,
+    entity_type TEXT NOT NULL DEFAULT 'Volunteer / rescuer', organisation_name TEXT,
+    phone TEXT, show_phone INTEGER NOT NULL DEFAULT 0, public_email TEXT, show_public_email INTEGER NOT NULL DEFAULT 0,
+    instagram_handle TEXT, show_instagram INTEGER NOT NULL DEFAULT 0, website TEXT, show_website INTEGER NOT NULL DEFAULT 0,
+    verification_document TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await addColumn('users', "role TEXT NOT NULL DEFAULT 'Community member'");
+  await addColumn('users', 'bio TEXT');
+  await addColumn('users', 'locality TEXT');
+  await addColumn('users', 'profile_photo TEXT');
+  await addColumn('users', "verification_status TEXT NOT NULL DEFAULT 'Unverified'");
+  await addColumn('users', 'verified_at TEXT');
+  await addColumn('users', 'is_admin INTEGER NOT NULL DEFAULT 0');
+  await addColumn('users', "entity_type TEXT NOT NULL DEFAULT 'Volunteer / rescuer'");
+  await addColumn('users', 'organisation_name TEXT');
+  await addColumn('users', 'phone TEXT');
+  await addColumn('users', 'show_phone INTEGER NOT NULL DEFAULT 0');
+  await addColumn('users', 'public_email TEXT');
+  await addColumn('users', 'show_public_email INTEGER NOT NULL DEFAULT 0');
+  await addColumn('users', 'instagram_handle TEXT');
+  await addColumn('users', 'show_instagram INTEGER NOT NULL DEFAULT 0');
+  await addColumn('users', 'website TEXT');
+  await addColumn('users', 'show_website INTEGER NOT NULL DEFAULT 0');
+  await addColumn('users', 'verification_document TEXT');
+
+  // Public directory records are kept separate from PawPath accounts. Imported
+  // contacts cannot log in or receive in-app messages, and their source status
+  // is never presented as PawPath identity verification.
+  await run(`CREATE TABLE IF NOT EXISTS directory_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_key TEXT NOT NULL UNIQUE,
+    category TEXT NOT NULL,
+    name TEXT NOT NULL,
+    subtype TEXT,
+    city TEXT,
+    state TEXT,
+    address TEXT,
+    phone_primary TEXT,
+    phone_secondary TEXT,
+    email TEXT,
+    services TEXT,
+    notes TEXT,
+    trust_status TEXT NOT NULL DEFAULT 'source_listed',
+    source_url TEXT,
+    source_checked_on TEXT,
+    awbi_code TEXT,
+    listing_readiness TEXT,
+    accepts_dogs INTEGER,
+    accepts_cats INTEGER,
+    accepts_stray_cases INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await run('CREATE INDEX IF NOT EXISTS idx_directory_category ON directory_entries (category)');
+  await run('CREATE INDEX IF NOT EXISTS idx_directory_state_city ON directory_entries (state, city)');
+  await run('CREATE INDEX IF NOT EXISTS idx_directory_trust ON directory_entries (trust_status)');
+
+  await run(`CREATE TABLE IF NOT EXISTS directory_imports (
+    source_version TEXT PRIMARY KEY,
+    record_count INTEGER NOT NULL,
+    imported_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await run(`CREATE TABLE IF NOT EXISTS animals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, species TEXT NOT NULL,
+    gender TEXT NOT NULL, age TEXT NOT NULL, size TEXT NOT NULL, colour TEXT NOT NULL, temperament TEXT NOT NULL,
+    vaccinated TEXT NOT NULL, sterilised TEXT NOT NULL, medical_notes TEXT, locality TEXT NOT NULL,
+    urgency TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Reported', photo_url TEXT,
+    description TEXT NOT NULL, contact_details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  await addColumn('animals', 'contact_details TEXT');
+
+  await run(`CREATE TABLE IF NOT EXISTS applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, animal_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+    request_type TEXT NOT NULL, housing_type TEXT NOT NULL, locality TEXT NOT NULL, pet_experience TEXT NOT NULL,
+    working_hours TEXT NOT NULL, contact_number TEXT NOT NULL, message TEXT NOT NULL,
+    compatibility_score INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (animal_id) REFERENCES animals(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+
+  await run(`CREATE TABLE IF NOT EXISTS rescue_updates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, animal_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+    update_text TEXT NOT NULL, update_type TEXT NOT NULL DEFAULT 'Progress update', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (animal_id) REFERENCES animals(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+
+  await run(`CREATE TABLE IF NOT EXISTS verification_applications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL UNIQUE, applicant_type TEXT NOT NULL,
+    full_name TEXT NOT NULL, phone TEXT NOT NULL, address TEXT NOT NULL, government_id_type TEXT NOT NULL,
+    government_id_reference TEXT NOT NULL, veterinarian_name TEXT NOT NULL, veterinarian_clinic TEXT NOT NULL,
+    veterinarian_contact TEXT NOT NULL, residence_proof_reference TEXT NOT NULL, pet_experience TEXT NOT NULL,
+    household_consent TEXT NOT NULL, home_visit_consent TEXT NOT NULL, welfare_commitment TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Under review', reviewer_notes TEXT,
+    proof_document TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  await addColumn('verification_applications', 'proof_document TEXT');
+
+  await run(`CREATE TABLE IF NOT EXISTS conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id INTEGER,
+    initiator_id INTEGER NOT NULL,
+    recipient_id INTEGER NOT NULL,
+    compatibility_score INTEGER NOT NULL,
+    topic TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(listing_id, initiator_id, recipient_id),
+    FOREIGN KEY (listing_id) REFERENCES animals(id) ON DELETE CASCADE,
+    FOREIGN KEY (initiator_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+
+  await run(`CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL,
+    sender_id INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  await addColumn('conversations', 'topic TEXT');
+  await allowGeneralConversations();
+}
+
+module.exports = { run, get, all, initialiseDatabase, usingPostgres };

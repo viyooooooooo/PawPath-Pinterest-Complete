@@ -1,0 +1,13 @@
+<%- include('partials/header') %>
+<section class="form-page messages-page">
+  <a class="text-link" href="/messages">← All messages</a>
+  <div class="chat-heading"><div><span class="kicker"><%= conversation.topic.toUpperCase() %></span><h1><%= otherName %></h1></div><% if (conversation.compatibility_score) { %><span class="verified-badge"><%= conversation.compatibility_score %>% starting compatibility</span><% } %></div>
+  <div class="chat-panel">
+    <div class="chat-notice">Keep chat on PawPath until you are comfortable. Verify information and never send money before confirming the need.</div>
+    <div class="message-stack">
+      <% messages.forEach(message => { %><div class="message-bubble <%= message.sender_id === currentUser.id ? 'message-own' : '' %>"><small><%= message.sender_id === currentUser.id ? 'You' : message.username %></small><p><%= message.body %></p></div><% }) %>
+    </div>
+    <form class="chat-compose" method="post" action="/messages/<%= conversation.id %>"><textarea name="body" required maxlength="1500" rows="3" placeholder="Write a respectful message…"></textarea><button class="button">Send message</button></form>
+  </div>
+</section>
+<%- include('partials/footer') %>
