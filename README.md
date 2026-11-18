@@ -8,8 +8,8 @@ PawPath connects animals in need with accountable rescuers, fosters, adopters, c
 - Standard signup plus a separate verification application covering identity, residence, veterinary reference, home-check consent and welfare commitments.
 - Ten seeded verified demo profiles with twelve animal listings.
 - 3,679 imported public network records: 26 rescue/volunteer contacts, 34 veterinary records and 3,619 AWBI-recognised organisations.
-- Interactive India map with clustered Listings and Network layers, SOS highlighting, search, category filters and browser-based “near me”.
-- Scroll-led Explore story with an animated PawPath puppy and map camera transitions.
+- Smooth vector India map powered by MapLibre and OpenFreeMap, with clustered Listings and Network layers, SOS highlighting, search, category filters and browser-based “near me”.
+- Cinematic featured-rescue carousel plus scroll-led reveals, scale transitions, sticky scenes and map camera movement across the Explore page.
 - Twelve distinct demo-animal photographs—no repeated listing image.
 - Logged-in users see other people’s listings before their own.
 - PostgreSQL in production with SQLite fallback for local development.
@@ -29,7 +29,7 @@ The first `npm start` imports the India directory. Later starts skip the import 
 
 ## Map locations
 
-The map uses Leaflet, OpenStreetMap tiles and marker clustering, so it does not require a Google Maps API key. Seeded Indore listings use locality-level coordinates. Nationwide directory records are placed from the city, district or state supplied by their public source and are labelled as approximate in the interface. PawPath does not claim that an approximate pin is a precise entrance or live rescue location.
+The map uses MapLibre with OpenFreeMap vector tiles and native point clustering, so it does not require a Google Maps API key. Place labels prefer English and Latin-script names when the map data provides them. Seeded Indore listings use locality-level coordinates. Nationwide directory records are placed from the city, district or state supplied by their public source and are labelled as approximate in the interface. PawPath does not claim that an approximate pin is a precise entrance or live rescue location.
 
 The migration adds `latitude`, `longitude` and `location_accuracy` to users, animal listings and public directory entries without deleting existing records. The updated directory source version runs once on the next deploy and safely refreshes the 3,679 imported map points.
 

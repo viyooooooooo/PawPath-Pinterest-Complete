@@ -1,66 +1,59 @@
 (() => {
   const mapElements = [...document.querySelectorAll('[data-paw-map]')];
   if (!mapElements.length) return;
-
   const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
   const dataPromise = fetch('/api/map-data').then((response) => {
     if (!response.ok) throw new Error('Map data could not be loaded.');
     return response.json();
   });
 
-  function isSos(point) {
-    return point.kind === 'listing' && ['Critical', 'Needs Help Today'].includes(point.urgency);
+  function isSos(point) { return point.kind === 'listing' && ['Critical', 'Needs Help Today'].includes(point.urgency); }
+  function pointColor(point) {
+    if (isSos(point)) return '#d94b3d';
+    if (point.kind === 'listing') return '#e6a62f';
+    if (point.category === 'vets') return '#2f80c9';
+    if (point.category === 'organisations') return '#247052';
+    return '#6bbf83';
   }
-
-  function markerDetails(point) {
-    if (isSos(point)) return { className: 'marker-sos', symbol: '!' };
-    if (point.kind === 'listing') return { className: 'marker-listing', symbol: point.subtype === 'Cat' ? '🐱' : point.subtype === 'Dog' ? '🐶' : '🐾' };
-    if (point.category === 'vets') return { className: 'marker-vets', symbol: '✚' };
-    if (point.category === 'organisations') return { className: 'marker-organisations', symbol: '⌂' };
-    return { className: 'marker-volunteers', symbol: '♥' };
+  function toGeoJson(points) {
+    return {
+      type: 'FeatureCollection',
+      features: points.map((point) => ({
+        type: 'Feature', id: point.id,
+        geometry: { type: 'Point', coordinates: [point.longitude, point.latitude] },
+        properties: { ...point, color: pointColor(point), sos: isSos(point) ? 1 : 0, photo: point.photo || '' }
+      }))
+    };
   }
-
   function pointPopup(point) {
     const approximate = point.locationAccuracy && point.locationAccuracy !== 'exact';
     const label = point.kind === 'listing' ? `${point.subtype || 'Animal'} · ${point.category}` : `${point.subtype || point.category} · ${point.trust || 'Network record'}`;
-    return `<div class="map-popup">
-      ${point.photo ? `<img src="${escapeHtml(point.photo)}" alt="${escapeHtml(point.name)}">` : ''}
-      <small>${escapeHtml(label)}</small><h3>${escapeHtml(point.name)}</h3>
-      <p>${escapeHtml(point.location || 'Location not supplied')}</p>
-      ${approximate ? '<p><span class="approximate">Approximate area pin</span></p>' : ''}
-      <a href="${escapeHtml(point.url)}">View details →</a>
-    </div>`;
+    return `<div class="map-popup">${point.photo ? `<img src="${escapeHtml(point.photo)}" alt="${escapeHtml(point.name)}">` : ''}<small>${escapeHtml(label)}</small><h3>${escapeHtml(point.name)}</h3><p>${escapeHtml(point.location || 'Location not supplied')}</p>${approximate ? '<p><span class="approximate">Approximate area pin</span></p>' : ''}<a href="${escapeHtml(point.url)}">View details →</a></div>`;
   }
-
-  function createMarker(point) {
-    const detail = markerDetails(point);
-    const icon = L.divIcon({
-      className: `paw-marker ${detail.className}`,
-      html: `<span>${detail.symbol}</span>`,
-      iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -20]
-    });
-    return L.marker([point.latitude, point.longitude], { icon, title: point.name, riseOnHover: true }).bindPopup(pointPopup(point), { maxWidth: 260 });
-  }
-
-  function makeClusterGroup() {
-    return L.markerClusterGroup({
-      chunkedLoading: true, chunkInterval: 120, chunkDelay: 25, maxClusterRadius: 52,
-      showCoverageOnHover: false, spiderfyOnMaxZoom: true, animate: true
+  function preferEnglishPlaceLabels(map) {
+    const style = map.getStyle();
+    (style.layers || []).forEach((layer) => {
+      if (layer.type !== 'symbol') return;
+      const id = String(layer.id || '').toLowerCase();
+      const placeLabel = /(country|state|province|city|town|village|settlement|place).*(label|name)|(label|name).*(country|state|province|city|town|village|settlement|place)/.test(id);
+      if (!placeLabel) return;
+      try { map.setLayoutProperty(layer.id, 'text-field', ['coalesce', ['get', 'name:en'], ['get', 'name:latin'], ['get', 'name']]); } catch (error) { /* Style layer does not expose a compatible text field. */ }
     });
   }
 
   function initMap(element, payload) {
     const mini = element.hasAttribute('data-mini-map');
-    const map = L.map(element, { zoomControl: !mini, scrollWheelZoom: !mini, dragging: true, attributionControl: !mini }).setView([22.9734, 78.6569], mini ? 4 : 5);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
+    const map = new maplibregl.Map({
+      container: element,
+      style: 'https://tiles.openfreemap.org/styles/bright',
+      center: [78.6569, 22.9734], zoom: mini ? 3.35 : 4.25,
+      minZoom: 2.4, maxZoom: 18, attributionControl: !mini,
+      interactive: !mini, fadeDuration: 250, cooperativeGestures: !mini
+    });
+    if (!mini) map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 
-    const state = { map, element, points: payload.points, group: makeClusterGroup(), mode: 'all', category: '', search: '' };
-    map.addLayer(state.group);
+    const state = { map, element, points: payload.points, mode: 'all', category: '', search: '', loaded: false };
     element._pawMap = state;
-
     const shell = element.closest('[data-map-shell]');
     const countElements = shell ? [...shell.querySelectorAll('[data-map-count], [data-map-total]')] : [];
     const totalOutside = document.querySelector('[data-map-total]');
@@ -76,100 +69,96 @@
       }
       return true;
     });
-
     const render = (fit = false) => {
       const points = filteredPoints();
-      state.group.clearLayers();
-      const markers = points.map(createMarker);
-      state.group.addLayers(markers);
       countElements.forEach((node) => { node.textContent = points.length.toLocaleString('en-IN'); });
-      if (fit && markers.length) {
-        const bounds = L.latLngBounds(points.map((point) => [point.latitude, point.longitude]));
-        map.fitBounds(bounds.pad(.08), { maxZoom: 12, animate: true });
+      if (state.loaded) map.getSource('pawpath-points')?.setData(toGeoJson(points));
+      if (fit && points.length) {
+        const bounds = points.reduce((box, point) => box.extend([point.longitude, point.latitude]), new maplibregl.LngLatBounds());
+        map.fitBounds(bounds, { padding: mini ? 15 : 70, maxZoom: 12, duration: 1100 });
       }
     };
-    render(false);
+
+    map.on('load', () => {
+      state.loaded = true;
+      preferEnglishPlaceLabels(map);
+      map.addSource('pawpath-points', { type: 'geojson', data: toGeoJson(filteredPoints()), cluster: true, clusterMaxZoom: 13, clusterRadius: mini ? 58 : 45 });
+      map.addLayer({ id: 'pawpath-clusters', type: 'circle', source: 'pawpath-points', filter: ['has', 'point_count'], paint: {
+        'circle-color': ['step', ['get', 'point_count'], '#2f7358', 100, '#245c45', 750, '#173d2f'],
+        'circle-radius': ['step', ['get', 'point_count'], 18, 100, 25, 750, 34],
+        'circle-stroke-width': 3, 'circle-stroke-color': 'rgba(255,255,255,.88)', 'circle-opacity': .94
+      }});
+      map.addLayer({ id: 'pawpath-cluster-count', type: 'symbol', source: 'pawpath-points', filter: ['has', 'point_count'], layout: { 'text-field': '{point_count_abbreviated}', 'text-size': 12 }, paint: { 'text-color': '#ffffff' } });
+      map.addLayer({ id: 'pawpath-points', type: 'circle', source: 'pawpath-points', filter: ['!', ['has', 'point_count']], paint: {
+        'circle-color': ['get', 'color'], 'circle-radius': ['case', ['==', ['get', 'sos'], 1], 8.5, 6],
+        'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff', 'circle-opacity': .92
+      }});
+      if (!mini) {
+        map.on('click', 'pawpath-clusters', async (event) => {
+          const feature = map.queryRenderedFeatures(event.point, { layers: ['pawpath-clusters'] })[0];
+          if (!feature) return;
+          const zoom = await map.getSource('pawpath-points').getClusterExpansionZoom(feature.properties.cluster_id);
+          map.easeTo({ center: feature.geometry.coordinates, zoom, duration: 650 });
+        });
+        map.on('click', 'pawpath-points', (event) => {
+          const feature = event.features?.[0];
+          if (!feature) return;
+          new maplibregl.Popup({ offset: 14, maxWidth: '270px' }).setLngLat(feature.geometry.coordinates).setHTML(pointPopup(feature.properties)).addTo(map);
+        });
+        ['pawpath-clusters', 'pawpath-points'].forEach((layer) => {
+          map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
+          map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
+        });
+      }
+      render(false);
+      document.querySelectorAll('[data-map-loading]').forEach((node) => node.classList.add('is-hidden'));
+    });
 
     if (shell) {
       shell.querySelectorAll('[data-map-filter]').forEach((button) => button.addEventListener('click', () => {
-        shell.querySelectorAll('[data-map-filter]').forEach((item) => item.classList.remove('is-active'));
-        button.classList.add('is-active');
-        state.mode = button.dataset.mapFilter;
-        state.category = '';
-        shell.querySelectorAll('[data-map-category]').forEach((item) => item.classList.remove('is-active'));
-        render(true);
+        shell.querySelectorAll('[data-map-filter]').forEach((item) => item.classList.remove('is-active')); button.classList.add('is-active');
+        state.mode = button.dataset.mapFilter; state.category = '';
+        shell.querySelectorAll('[data-map-category]').forEach((item) => item.classList.remove('is-active')); render(true);
       }));
       shell.querySelectorAll('[data-map-category]').forEach((button) => button.addEventListener('click', () => {
         const active = button.classList.toggle('is-active');
         shell.querySelectorAll('[data-map-category]').forEach((item) => { if (item !== button) item.classList.remove('is-active'); });
         state.category = active ? button.dataset.mapCategory : '';
-        if (active) {
-          state.mode = button.dataset.mapCategory === 'sos' ? 'listing' : 'network';
-          shell.querySelectorAll('[data-map-filter]').forEach((item) => item.classList.toggle('is-active', item.dataset.mapFilter === state.mode));
-        }
+        if (active) { state.mode = state.category === 'sos' ? 'listing' : 'network'; shell.querySelectorAll('[data-map-filter]').forEach((item) => item.classList.toggle('is-active', item.dataset.mapFilter === state.mode)); }
         render(true);
       }));
-      const search = shell.querySelector('[data-map-search]');
-      let searchTimer;
-      if (search) search.addEventListener('input', () => {
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(() => { state.search = search.value.trim().toLowerCase(); render(Boolean(state.search)); }, 180);
-      });
+      const search = shell.querySelector('[data-map-search]'); let searchTimer;
+      search?.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { state.search = search.value.trim().toLowerCase(); render(Boolean(state.search)); }, 180); });
       const nearMe = shell.querySelector('[data-near-me]');
-      if (nearMe) nearMe.addEventListener('click', () => {
+      nearMe?.addEventListener('click', () => {
         nearMe.textContent = 'Finding your location…';
-        map.locate({ setView: true, maxZoom: 12, enableHighAccuracy: true });
+        navigator.geolocation.getCurrentPosition(({ coords }) => {
+          const marker = document.createElement('span'); marker.className = 'user-location';
+          new maplibregl.Marker({ element: marker }).setLngLat([coords.longitude, coords.latitude]).setPopup(new maplibregl.Popup().setText('You are around here')).addTo(map);
+          map.flyTo({ center: [coords.longitude, coords.latitude], zoom: 11.5, duration: 1200 }); nearMe.textContent = '◎ Location found';
+        }, () => { nearMe.textContent = 'Location unavailable—try again'; }, { enableHighAccuracy: true, timeout: 10000 });
       });
-      map.on('locationfound', (event) => {
-        L.marker(event.latlng, { icon: L.divIcon({ className: 'user-location', iconSize: [16, 16], iconAnchor: [8, 8] }) }).addTo(map).bindPopup('You are around here').openPopup();
-        L.circle(event.latlng, { radius: Math.min(event.accuracy, 1500), color: '#2677d8', fillOpacity: .08, weight: 1 }).addTo(map);
-        if (nearMe) nearMe.textContent = '◎ Location found';
-      });
-      map.on('locationerror', () => { if (nearMe) nearMe.textContent = 'Location unavailable—try again'; });
     }
-    setTimeout(() => map.invalidateSize(), 100);
     return state;
   }
 
-  if (typeof L === 'undefined') {
-    document.querySelectorAll('[data-map-loading]').forEach((node) => { node.textContent = 'The interactive map could not load. Refresh to try again.'; });
-    return;
-  }
-
-  dataPromise.then((payload) => {
-    mapElements.forEach((element) => initMap(element, payload));
-    document.querySelectorAll('[data-map-loading]').forEach((node) => node.classList.add('is-hidden'));
-  }).catch((error) => {
-    document.querySelectorAll('[data-map-loading]').forEach((node) => { node.textContent = error.message; });
-  });
+  if (typeof maplibregl === 'undefined') { document.querySelectorAll('[data-map-loading]').forEach((node) => { node.textContent = 'The interactive map could not load. Refresh to try again.'; }); return; }
+  dataPromise.then((payload) => mapElements.forEach((element) => initMap(element, payload))).catch((error) => { document.querySelectorAll('[data-map-loading]').forEach((node) => { node.textContent = error.message; }); });
 
   const story = document.querySelector('[data-map-story]');
   if (story) {
     const steps = [...story.querySelectorAll('[data-story-step]')];
-    const puppyTrack = story.querySelector('.puppy-track');
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (!entry.isIntersecting) return;
         steps.forEach((step) => step.classList.toggle('is-active', step === entry.target));
-        const state = story.querySelector('[data-mini-map]')?._pawMap;
-        if (!state) return;
+        const state = story.querySelector('[data-mini-map]')?._pawMap; if (!state) return;
         const index = Number(entry.target.dataset.storyStep);
-        if (index === 0) state.map.flyTo([22.9734, 78.6569], 4, { duration: 1.2 });
-        if (index === 1) state.map.flyTo([22.7196, 75.8577], 11, { duration: 1.2 });
-        if (index === 2) state.map.flyTo([22.7196, 75.8577], 8, { duration: 1.2 });
+        if (index === 0) state.map.flyTo({ center: [78.6569, 22.9734], zoom: 3.35, duration: 1300 });
+        if (index === 1) state.map.flyTo({ center: [75.8577, 22.7196], zoom: 10.6, duration: 1500 });
+        if (index === 2) state.map.flyTo({ center: [75.8577, 22.7196], zoom: 7.6, duration: 1300 });
       });
     }, { rootMargin: '-35% 0px -45% 0px', threshold: .08 });
     steps.forEach((step) => observer.observe(step));
-
-    let scheduled = false;
-    const movePuppy = () => {
-      scheduled = false;
-      const bounds = story.getBoundingClientRect();
-      const travel = Math.max(1, bounds.height - window.innerHeight);
-      const progress = Math.max(0, Math.min(1, -bounds.top / travel));
-      if (puppyTrack) puppyTrack.style.setProperty('--puppy-x', String(Math.round(progress * 82)));
-    };
-    window.addEventListener('scroll', () => { if (!scheduled) { scheduled = true; requestAnimationFrame(movePuppy); } }, { passive: true });
-    movePuppy();
   }
 })();
