@@ -2,8 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { run, get, initialiseDatabase } = require('./database');
 const { parseCsv } = require('./data-utils');
+const { coordinatesForPlace } = require('./geo-utils');
 
-const SOURCE_VERSION = 'india-directory-2026-11-18-v1';
+const SOURCE_VERSION = 'india-directory-2026-11-19-map-v2';
 const IMPORT_DIRECTORY = path.join(__dirname, 'data', 'imports');
 
 function readCsv(filename) {
@@ -94,7 +95,8 @@ const columns = [
   'source_key', 'category', 'name', 'subtype', 'city', 'state', 'address',
   'phone_primary', 'phone_secondary', 'email', 'services', 'notes', 'trust_status',
   'source_url', 'source_checked_on', 'awbi_code', 'listing_readiness',
-  'accepts_dogs', 'accepts_cats', 'accepts_stray_cases'
+  'accepts_dogs', 'accepts_cats', 'accepts_stray_cases',
+  'latitude', 'longitude', 'location_accuracy'
 ];
 
 async function upsertBatch(entries) {
@@ -121,6 +123,9 @@ async function upsertBatch(entries) {
       accepts_dogs=CASE WHEN directory_entries.category='organisations' THEN directory_entries.accepts_dogs ELSE EXCLUDED.accepts_dogs END,
       accepts_cats=CASE WHEN directory_entries.category='organisations' THEN directory_entries.accepts_cats ELSE EXCLUDED.accepts_cats END,
       accepts_stray_cases=CASE WHEN directory_entries.category='organisations' THEN directory_entries.accepts_stray_cases ELSE EXCLUDED.accepts_stray_cases END,
+      latitude=EXCLUDED.latitude,
+      longitude=EXCLUDED.longitude,
+      location_accuracy=EXCLUDED.location_accuracy,
       updated_at=CURRENT_TIMESTAMP`, values);
 }
 
@@ -131,7 +136,10 @@ async function seedDirectory() {
     return Number(completed.record_count);
   }
 
-  const entries = [...volunteerEntries(), ...veterinaryEntries(), ...organisationEntries()];
+  const entries = [...volunteerEntries(), ...veterinaryEntries(), ...organisationEntries()].map((entry) => ({
+    ...entry,
+    ...coordinatesForPlace([entry.address, entry.city].filter(Boolean).join(', '), entry.state, entry.source_key)
+  }));
   for (let index = 0; index < entries.length; index += 20) {
     await upsertBatch(entries.slice(index, index + 20));
   }

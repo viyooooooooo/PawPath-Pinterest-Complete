@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 150" role="img" aria-labelledby="title">
+  <title id="title">Playful running puppy</title>
+  <g fill="none" stroke="#17221d" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path fill="#d6ed8d" d="M73 53c23-25 74-24 102 4 16 17 14 43-5 55-24 16-75 14-99-5-17-14-16-37 2-54Z"/>
+    <path fill="#d6ed8d" d="M169 59c12-27 34-35 47-21 12 13 3 35-20 44"/>
+    <path fill="#f3d4c7" d="M66 58C51 35 28 32 21 49c-6 15 10 31 34 33"/>
+    <path fill="#d6ed8d" d="M63 55c-15-12-34-9-42 5-9 17 5 38 28 40 18 2 33-8 36-25"/>
+    <path fill="#17221d" d="M36 66h1M62 66h1"/>
+    <path d="M43 82c8 8 18 7 25-1"/>
+    <path fill="#c94d3d" d="M66 91c-4 15 11 22 20 10"/>
+    <path d="M91 108 76 133M125 111l-4 25M154 108l18 24M92 132H70M120 136h20M171 132h20"/>
+    <path d="M82 56c18 10 35 11 52 4" opacity=".25"/>
+  </g>
+</svg>

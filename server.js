@@ -3,6 +3,7 @@ const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const { run, get, all, initialiseDatabase } = require('./database');
+const { coordinatesForPlace } = require('./geo-utils');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -146,12 +147,15 @@ function photoFromRequest(req, existingPhoto = '') {
 }
 
 function listingValues(body, photoUrl) {
+  const locality = String(body.locality || '').trim();
+  const coordinates = coordinatesForPlace(locality, '', `listing:${body.name || ''}:${locality}`);
   return [
     String(body.name || '').trim(), body.species || 'Unknown', body.gender || 'Unknown', String(body.age || '').trim() || 'Unknown',
     body.size || 'Unknown', String(body.colour || '').trim() || 'Not added', String(body.temperament || '').trim() || 'Not added',
-    body.vaccinated || 'Unknown', body.sterilised || 'Unknown', String(body.medical_notes || '').trim(), String(body.locality || '').trim(),
+    body.vaccinated || 'Unknown', body.sterilised || 'Unknown', String(body.medical_notes || '').trim(), locality,
     body.urgency || 'Normal', body.category || 'Up for Adoption', body.status || 'Reported', photoUrl,
-    String(body.description || '').trim() || 'No description added yet.', String(body.contact_details || '').trim()
+    String(body.description || '').trim() || 'No description added yet.', String(body.contact_details || '').trim(),
+    coordinates.latitude, coordinates.longitude, coordinates.location_accuracy
   ];
 }
 function compatibility(body) {
@@ -187,7 +191,7 @@ app.get('/', async (req, res, next) => {
     const animals = await all(`SELECT animals.*, users.username, users.verification_status FROM animals JOIN users ON users.id=animals.user_id ORDER BY CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, animals.created_at DESC LIMIT 10`);
     const profiles = await all(`SELECT users.*, COUNT(animals.id) AS listing_count FROM users LEFT JOIN animals ON animals.user_id=users.id WHERE users.verification_status='Verified' GROUP BY users.id ORDER BY listing_count DESC, users.username LIMIT 6`);
     const stories = await all(`SELECT rescue_updates.*, animals.name AS animal_name, animals.photo_url FROM rescue_updates JOIN animals ON animals.id = rescue_updates.animal_id ORDER BY rescue_updates.created_at DESC LIMIT 3`);
-    res.render('home', { title: 'PawPath | Rescue, foster and adopt responsibly', urgent, stats, animals, stories, profiles });
+    res.render('home', { title: 'PawPath | Rescue, foster and adopt responsibly', urgent, stats, animals, stories, profiles, mapAssets: true });
   } catch (error) { next(error); }
 });
 
@@ -200,6 +204,53 @@ app.get('/sos', async (req, res, next) => {
 });
 app.get('/foster', (req, res) => res.redirect('/animals?category=Urgent%20Foster%20Needed'));
 app.get('/community', (req, res) => res.redirect('/animals?category=Community%20Feeder%20Spot'));
+
+app.get('/map', (req, res) => res.render('map', { title: 'Live map | PawPath', mapAssets: true }));
+
+app.get('/api/map-data', async (req, res, next) => {
+  try {
+    const animals = await all(`SELECT id,name,species,locality,urgency,category,status,photo_url,latitude,longitude,location_accuracy
+      FROM animals WHERE status NOT IN ('Adopted','Resolved') ORDER BY created_at DESC`);
+    const members = await all(`SELECT id,username AS name,entity_type AS category,locality AS location,latitude,longitude,location_accuracy
+      FROM users WHERE verification_status='Verified' ORDER BY username`);
+    const directory = await all(`SELECT id,name,category,subtype,city,state,address,trust_status,listing_readiness,latitude,longitude,location_accuracy
+      FROM directory_entries ORDER BY category,name`);
+
+    const listingPoints = animals.map((animal) => {
+      const fallback = coordinatesForPlace(animal.locality, '', `animal:${animal.id}`);
+      return {
+        id: `listing-${animal.id}`, kind: 'listing', recordId: animal.id, name: animal.name,
+        category: animal.category, subtype: animal.species, location: animal.locality,
+        urgency: animal.urgency, status: animal.status, photo: animal.photo_url,
+        latitude: Number(animal.latitude ?? fallback.latitude), longitude: Number(animal.longitude ?? fallback.longitude),
+        locationAccuracy: animal.location_accuracy || fallback.location_accuracy, url: `/animals/${animal.id}`
+      };
+    });
+    const memberPoints = members.map((member) => {
+      const fallback = coordinatesForPlace(member.location, '', `member:${member.id}`);
+      const group = member.category === 'Veterinarian / vet clinic' ? 'vets' : member.category === 'Shelter / NGO / rescue organisation' ? 'organisations' : 'volunteers';
+      return {
+        id: `member-${member.id}`, kind: 'network', recordId: member.id, name: member.name,
+        category: group, subtype: member.category, location: member.location, trust: 'PawPath verified',
+        latitude: Number(member.latitude ?? fallback.latitude), longitude: Number(member.longitude ?? fallback.longitude),
+        locationAccuracy: member.location_accuracy || fallback.location_accuracy, url: `/profiles/${member.id}`
+      };
+    });
+    const directoryPoints = directory.map((entry) => {
+      const location = [entry.address, entry.city, entry.state].filter(Boolean).join(', ');
+      const fallback = coordinatesForPlace([entry.address, entry.city].filter(Boolean).join(', '), entry.state, `directory:${entry.id}`);
+      return {
+        id: `directory-${entry.id}`, kind: 'network', recordId: entry.id, name: entry.name,
+        category: entry.category, subtype: entry.subtype, location,
+        trust: entry.listing_readiness === 'service_verified' ? 'Rescue services confirmed' : entry.trust_status === 'awbi_recognised' ? 'AWBI recognised' : 'Source checked',
+        latitude: Number(entry.latitude ?? fallback.latitude), longitude: Number(entry.longitude ?? fallback.longitude),
+        locationAccuracy: entry.location_accuracy || fallback.location_accuracy, url: `/directory/${entry.id}`
+      };
+    });
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json({ generatedAt: new Date().toISOString(), points: [...listingPoints, ...memberPoints, ...directoryPoints] });
+  } catch (error) { next(error); }
+});
 
 app.get('/profiles', async (req, res, next) => {
   try {
@@ -367,7 +418,7 @@ app.post('/animals', requireLogin, upload.single('photo'), async (req, res, next
   if (errors.length) return res.status(400).render('animal-form', { title: 'Fix listing details | PawPath', animal: { ...req.body, photo_url: uploadedPhoto }, action: '/animals', formTitle: 'Create an animal profile', errors });
   try {
     const b = req.body;
-    const result = await run(`INSERT INTO animals (user_id,name,species,gender,age,size,colour,temperament,vaccinated,sterilised,medical_notes,locality,urgency,category,status,photo_url,description,contact_details) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...listingValues(b, uploadedPhoto)]);
+    const result = await run(`INSERT INTO animals (user_id,name,species,gender,age,size,colour,temperament,vaccinated,sterilised,medical_notes,locality,urgency,category,status,photo_url,description,contact_details,latitude,longitude,location_accuracy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...listingValues(b, uploadedPhoto)]);
     flash(req, 'success', 'Animal profile created—thank you for taking action.');
     res.redirect(`/animals/${result.id}`);
   } catch (error) { next(error); }
@@ -397,7 +448,7 @@ app.post('/animals/:id/edit', requireLogin, upload.single('photo'), async (req, 
   if (errors.length) return res.status(400).render('animal-form', { title: 'Fix listing details | PawPath', animal: { ...existing, ...req.body, id: req.params.id, photo_url: uploadedPhoto }, action: `/animals/${req.params.id}/edit`, formTitle: `Edit ${existing.name}'s profile`, errors });
   try {
     const b = req.body;
-    await run(`UPDATE animals SET name=?,species=?,gender=?,age=?,size=?,colour=?,temperament=?,vaccinated=?,sterilised=?,medical_notes=?,locality=?,urgency=?,category=?,status=?,photo_url=?,description=?,contact_details=? WHERE id=?`, [...listingValues(b, uploadedPhoto), existing.id]);
+    await run(`UPDATE animals SET name=?,species=?,gender=?,age=?,size=?,colour=?,temperament=?,vaccinated=?,sterilised=?,medical_notes=?,locality=?,urgency=?,category=?,status=?,photo_url=?,description=?,contact_details=?,latitude=?,longitude=?,location_accuracy=? WHERE id=?`, [...listingValues(b, uploadedPhoto), existing.id]);
     flash(req, 'success', 'Animal profile updated.'); res.redirect(`/animals/${existing.id}`);
   } catch (error) { next(error); }
 });
@@ -473,12 +524,14 @@ app.post('/signup', proofUpload.single('verification_document'), async (req, res
     const exists = await get('SELECT id FROM users WHERE email = ? OR username = ?', [email.trim().toLowerCase(), username.trim()]);
     if (exists) return res.status(400).render('signup', { title: 'Join PawPath', errors: ['An account with that email or username already exists.'], values: req.body });
     const hash = await bcrypt.hash(password, 10);
-    const result = await run(`INSERT INTO users (username,email,password_hash,role,locality,entity_type,organisation_name,phone,show_phone,public_email,show_public_email,instagram_handle,show_instagram,website,show_website,verification_document) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    const memberGeo = coordinatesForPlace(locality, '', `member:${email}`);
+    const result = await run(`INSERT INTO users (username,email,password_hash,role,locality,entity_type,organisation_name,phone,show_phone,public_email,show_public_email,instagram_handle,show_instagram,website,show_website,verification_document,latitude,longitude,location_accuracy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       username.trim(), email.trim().toLowerCase(), hash, role || 'Community member', String(locality || '').trim(), entity_type,
       String(organisation_name || '').trim(), String(phone || '').replace(/\s/g, ''), req.body.show_phone === 'on' ? 1 : 0,
       String(public_email || '').trim().toLowerCase(), req.body.show_public_email === 'on' ? 1 : 0,
       String(instagram_handle || '').trim().replace(/^@/, ''), req.body.show_instagram === 'on' ? 1 : 0,
-      safeWebsite(website), req.body.show_website === 'on' ? 1 : 0, proofFromRequest(req)
+      safeWebsite(website), req.body.show_website === 'on' ? 1 : 0, proofFromRequest(req),
+      memberGeo.latitude, memberGeo.longitude, memberGeo.location_accuracy
     ]);
     req.session.user = { id: result.id, username: username.trim(), email: email.trim().toLowerCase(), verification_status: 'Unverified', is_admin: 0 };
     flash(req, 'success', 'Welcome to PawPath. You can now report or support an animal.'); res.redirect('/dashboard');

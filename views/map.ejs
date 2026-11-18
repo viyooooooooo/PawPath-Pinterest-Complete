@@ -1,0 +1,35 @@
+<%- include('partials/header') %>
+<section class="map-page-hero">
+  <div>
+    <span class="kicker">PAWPATH LIVE MAP</span>
+    <h1>Help, mapped across India.</h1>
+    <p>Explore active animal listings, urgent SOS cases, volunteers, veterinary care and animal-welfare organisations in one place.</p>
+  </div>
+  <div class="map-hero-stat"><strong data-map-total>—</strong><span>visible places and cases</span></div>
+</section>
+
+<section class="map-explorer" data-map-shell>
+  <aside class="map-sidebar">
+    <div class="map-mode-switch" role="group" aria-label="Map content">
+      <button class="is-active" data-map-filter="all">Everything</button>
+      <button data-map-filter="listing">Listings</button>
+      <button data-map-filter="network">Network</button>
+    </div>
+    <label class="map-search-label">Search this map<input type="search" data-map-search placeholder="Animal, city, clinic or shelter"></label>
+    <div class="map-filter-stack">
+      <span>Quick layers</span>
+      <button data-map-category="sos"><i class="legend-dot legend-sos"></i>Urgent SOS</button>
+      <button data-map-category="vets"><i class="legend-dot legend-vet"></i>Veterinary care</button>
+      <button data-map-category="organisations"><i class="legend-dot legend-shelter"></i>Shelters & organisations</button>
+      <button data-map-category="volunteers"><i class="legend-dot legend-volunteer"></i>Volunteers & rescuers</button>
+    </div>
+    <button class="near-me-button" data-near-me>◎ Show what’s near me</button>
+    <p class="map-accuracy-note">Pins marked “approximate” use the locality, district or state supplied by the source. “Near me” only centres your map; PawPath does not save your browser location.</p>
+  </aside>
+  <div class="map-canvas-wrap">
+    <div id="pawpathMap" class="pawpath-map full-map" data-paw-map aria-label="Interactive PawPath India map"></div>
+    <div class="map-loading" data-map-loading><span></span>Loading the PawPath network…</div>
+    <div class="map-result-pill"><strong data-map-count>—</strong> shown</div>
+  </div>
+</section>
+<%- include('partials/footer') %>

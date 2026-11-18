@@ -100,6 +100,7 @@ async function initialiseDatabase() {
     phone TEXT, show_phone INTEGER NOT NULL DEFAULT 0, public_email TEXT, show_public_email INTEGER NOT NULL DEFAULT 0,
     instagram_handle TEXT, show_instagram INTEGER NOT NULL DEFAULT 0, website TEXT, show_website INTEGER NOT NULL DEFAULT 0,
     verification_document TEXT,
+    latitude REAL, longitude REAL, location_accuracy TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`);
   await addColumn('users', "role TEXT NOT NULL DEFAULT 'Community member'");
@@ -120,6 +121,9 @@ async function initialiseDatabase() {
   await addColumn('users', 'website TEXT');
   await addColumn('users', 'show_website INTEGER NOT NULL DEFAULT 0');
   await addColumn('users', 'verification_document TEXT');
+  await addColumn('users', 'latitude REAL');
+  await addColumn('users', 'longitude REAL');
+  await addColumn('users', 'location_accuracy TEXT');
 
   // Public directory records are kept separate from PawPath accounts. Imported
   // contacts cannot log in or receive in-app messages, and their source status
@@ -146,12 +150,18 @@ async function initialiseDatabase() {
     accepts_dogs INTEGER,
     accepts_cats INTEGER,
     accepts_stray_cases INTEGER,
+    latitude REAL,
+    longitude REAL,
+    location_accuracy TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`);
   await run('CREATE INDEX IF NOT EXISTS idx_directory_category ON directory_entries (category)');
   await run('CREATE INDEX IF NOT EXISTS idx_directory_state_city ON directory_entries (state, city)');
   await run('CREATE INDEX IF NOT EXISTS idx_directory_trust ON directory_entries (trust_status)');
+  await addColumn('directory_entries', 'latitude REAL');
+  await addColumn('directory_entries', 'longitude REAL');
+  await addColumn('directory_entries', 'location_accuracy TEXT');
 
   await run(`CREATE TABLE IF NOT EXISTS directory_imports (
     source_version TEXT PRIMARY KEY,
@@ -164,10 +174,14 @@ async function initialiseDatabase() {
     gender TEXT NOT NULL, age TEXT NOT NULL, size TEXT NOT NULL, colour TEXT NOT NULL, temperament TEXT NOT NULL,
     vaccinated TEXT NOT NULL, sterilised TEXT NOT NULL, medical_notes TEXT, locality TEXT NOT NULL,
     urgency TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Reported', photo_url TEXT,
-    description TEXT NOT NULL, contact_details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    description TEXT NOT NULL, contact_details TEXT, latitude REAL, longitude REAL, location_accuracy TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
   await addColumn('animals', 'contact_details TEXT');
+  await addColumn('animals', 'latitude REAL');
+  await addColumn('animals', 'longitude REAL');
+  await addColumn('animals', 'location_accuracy TEXT');
 
   await run(`CREATE TABLE IF NOT EXISTS applications (
     id INTEGER PRIMARY KEY AUTOINCREMENT, animal_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
