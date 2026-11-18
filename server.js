@@ -21,6 +21,33 @@ const upload = multer({
   limits: { fileSize: 4 * 1024 * 1024 },
   fileFilter: (req, file, done) => done(/^image\//.test(file.mimetype) ? null : new Error('Please choose an image file.'), /^image\//.test(file.mimetype))
 });
+const proofUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, done) => {
+    const allowed = /^image\//.test(file.mimetype) || file.mimetype === 'application/pdf';
+    done(allowed ? null : new Error('Please upload a PDF or image file.'), allowed);
+  }
+});
+
+const networkGroups = {
+  volunteers: { label: 'Volunteers, rescuers & helpers', values: ['Volunteer / rescuer'] },
+  vets: { label: 'Veterinarians & vet clinics', values: ['Veterinarian / vet clinic'] },
+  organisations: { label: 'Shelters, NGOs & rescue organisations', values: ['Shelter / NGO / rescue organisation'] }
+};
+
+function safeWebsite(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  try {
+    const url = new URL(text.startsWith('http') ? text : `https://${text}`);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+  } catch (error) { return ''; }
+}
+function proofFromRequest(req, existing = '') {
+  if (!req.file) return existing;
+  return `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+}
 
 function freshCaptcha(req) {
   const first = Math.floor(Math.random() * 8) + 2;
@@ -114,18 +141,23 @@ app.get('/profiles', async (req, res, next) => {
   try {
     const status = req.query.status || 'Verified';
     const role = req.query.role || '';
+    const group = networkGroups[req.query.group] ? req.query.group : '';
     const clauses = status ? ['users.verification_status = ?'] : [];
     const params = status ? [status] : [];
     if (req.session.user) { clauses.push('users.id != ?'); params.push(req.session.user.id); }
     if (role) { clauses.push('users.role = ?'); params.push(role); }
+    if (group) {
+      clauses.push(`users.entity_type IN (${networkGroups[group].values.map(() => '?').join(',')})`);
+      params.push(...networkGroups[group].values);
+    }
     const profiles = await all(`SELECT users.*, COUNT(animals.id) AS listing_count FROM users LEFT JOIN animals ON animals.user_id=users.id ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} GROUP BY users.id ORDER BY CASE users.verification_status WHEN 'Verified' THEN 1 WHEN 'Under review' THEN 2 ELSE 3 END, listing_count DESC, users.username`, params);
-    res.render('profiles', { title: 'Verified people | PawPath', profiles, filters: { status, role } });
+    res.render('profiles', { title: 'Verified network | PawPath', profiles, filters: { status, role, group }, networkGroups });
   } catch (error) { next(error); }
 });
 
 app.get('/profiles/:id', async (req, res, next) => {
   try {
-    const profile = await get('SELECT id, username, role, bio, locality, profile_photo, verification_status, verified_at, created_at FROM users WHERE id=?', [req.params.id]);
+    const profile = await get('SELECT id, username, role, bio, locality, profile_photo, verification_status, verified_at, created_at, entity_type, organisation_name, phone, show_phone, public_email, show_public_email, instagram_handle, show_instagram, website, show_website FROM users WHERE id=?', [req.params.id]);
     if (!profile) return res.status(404).render('error', { title: 'Profile not found | PawPath', message: 'That community profile does not exist.' });
     if (req.session.user && profile.id === req.session.user.id) return res.redirect('/dashboard');
     const listings = await all("SELECT * FROM animals WHERE user_id=? ORDER BY CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, created_at DESC", [profile.id]);
@@ -321,20 +353,30 @@ app.get('/dashboard', requireLogin, async (req, res, next) => {
 });
 
 app.get('/signup', (req, res) => res.render('signup', { title: 'Join PawPath', errors: [], values: {} }));
-app.post('/signup', async (req, res, next) => {
-  const { username, email, password, confirm_password, captcha_answer, role, locality } = req.body;
+app.post('/signup', proofUpload.single('verification_document'), async (req, res, next) => {
+  const { username, email, password, confirm_password, captcha_answer, role, locality, entity_type, organisation_name, phone, public_email, instagram_handle, website } = req.body;
   const errors = [];
   if (String(username || '').trim().length < 3) errors.push('Username must have at least 3 characters.');
   if (!/^\S+@\S+\.\S+$/.test(String(email || ''))) errors.push('Enter a valid email address.');
   if (String(password || '').length < 8) errors.push('Password must have at least 8 characters.');
   if (password !== confirm_password) errors.push('Passwords do not match.');
+  if (!Object.values(networkGroups).flatMap((group) => group.values).includes(entity_type)) errors.push('Please choose how you will participate in the PawPath network.');
+  if (phone && !/^\d{10}$/.test(String(phone).replace(/\s/g, ''))) errors.push('Enter a valid 10-digit phone number, or leave it blank.');
+  if (public_email && !/^\S+@\S+\.\S+$/.test(String(public_email))) errors.push('Enter a valid public email address, or leave it blank.');
+  if (website && !safeWebsite(website)) errors.push('Enter a valid website address, or leave it blank.');
   if (!captchaOk(req, captcha_answer)) errors.push('CAPTCHA answer was incorrect. Please try the new question.');
-  if (errors.length) return res.status(400).render('signup', { title: 'Join PawPath', errors, values: { username, email } });
+  if (errors.length) return res.status(400).render('signup', { title: 'Join PawPath', errors, values: req.body });
   try {
     const exists = await get('SELECT id FROM users WHERE email = ? OR username = ?', [email.trim().toLowerCase(), username.trim()]);
-    if (exists) return res.status(400).render('signup', { title: 'Join PawPath', errors: ['An account with that email or username already exists.'], values: { username, email } });
+    if (exists) return res.status(400).render('signup', { title: 'Join PawPath', errors: ['An account with that email or username already exists.'], values: req.body });
     const hash = await bcrypt.hash(password, 10);
-    const result = await run('INSERT INTO users (username,email,password_hash,role,locality) VALUES (?,?,?,?,?)', [username.trim(), email.trim().toLowerCase(), hash, role || 'Community member', String(locality || '').trim()]);
+    const result = await run(`INSERT INTO users (username,email,password_hash,role,locality,entity_type,organisation_name,phone,show_phone,public_email,show_public_email,instagram_handle,show_instagram,website,show_website,verification_document) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      username.trim(), email.trim().toLowerCase(), hash, role || 'Community member', String(locality || '').trim(), entity_type,
+      String(organisation_name || '').trim(), String(phone || '').replace(/\s/g, ''), req.body.show_phone === 'on' ? 1 : 0,
+      String(public_email || '').trim().toLowerCase(), req.body.show_public_email === 'on' ? 1 : 0,
+      String(instagram_handle || '').trim().replace(/^@/, ''), req.body.show_instagram === 'on' ? 1 : 0,
+      safeWebsite(website), req.body.show_website === 'on' ? 1 : 0, proofFromRequest(req)
+    ]);
     req.session.user = { id: result.id, username: username.trim(), email: email.trim().toLowerCase(), verification_status: 'Unverified', is_admin: 0 };
     flash(req, 'success', 'Welcome to PawPath. You can now report or support an animal.'); res.redirect('/dashboard');
   } catch (error) { next(error); }
@@ -361,17 +403,18 @@ app.get('/verification/apply', requireLogin, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.post('/verification/apply', requireLogin, async (req, res, next) => {
+app.post('/verification/apply', requireLogin, proofUpload.single('proof_document'), async (req, res, next) => {
   const b = req.body;
   const required = ['applicant_type','full_name','phone','address','government_id_type','government_id_reference','veterinarian_name','veterinarian_clinic','veterinarian_contact','residence_proof_reference','pet_experience','household_consent','home_visit_consent','welfare_commitment'];
   const errors = required.filter((field) => !String(b[field] || '').trim()).map((field) => `${field.replaceAll('_', ' ')} is required.`);
   if (!/^\d{10}$/.test(String(b.phone || '').replace(/\s/g, ''))) errors.push('Enter a valid 10-digit phone number.');
   if (errors.length) return res.status(400).render('verification', { title: 'Apply for verification | PawPath', errors, values: b });
   try {
-    const existing = await get('SELECT id FROM verification_applications WHERE user_id=?', [req.session.user.id]);
+    const existing = await get('SELECT id, proof_document FROM verification_applications WHERE user_id=?', [req.session.user.id]);
     const values = [b.applicant_type,b.full_name.trim(),b.phone.replace(/\s/g,''),b.address.trim(),b.government_id_type,b.government_id_reference.trim(),b.veterinarian_name.trim(),b.veterinarian_clinic.trim(),b.veterinarian_contact.trim(),b.residence_proof_reference.trim(),b.pet_experience.trim(),b.household_consent,b.home_visit_consent,b.welfare_commitment];
-    if (existing) await run(`UPDATE verification_applications SET applicant_type=?,full_name=?,phone=?,address=?,government_id_type=?,government_id_reference=?,veterinarian_name=?,veterinarian_clinic=?,veterinarian_contact=?,residence_proof_reference=?,pet_experience=?,household_consent=?,home_visit_consent=?,welfare_commitment=?,status='Under review',updated_at=CURRENT_TIMESTAMP WHERE user_id=?`, [...values, req.session.user.id]);
-    else await run(`INSERT INTO verification_applications (user_id,applicant_type,full_name,phone,address,government_id_type,government_id_reference,veterinarian_name,veterinarian_clinic,veterinarian_contact,residence_proof_reference,pet_experience,household_consent,home_visit_consent,welfare_commitment) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...values]);
+    const document = proofFromRequest(req, existing?.proof_document || '');
+    if (existing) await run(`UPDATE verification_applications SET applicant_type=?,full_name=?,phone=?,address=?,government_id_type=?,government_id_reference=?,veterinarian_name=?,veterinarian_clinic=?,veterinarian_contact=?,residence_proof_reference=?,pet_experience=?,household_consent=?,home_visit_consent=?,welfare_commitment=?,proof_document=?,status='Under review',updated_at=CURRENT_TIMESTAMP WHERE user_id=?`, [...values, document, req.session.user.id]);
+    else await run(`INSERT INTO verification_applications (user_id,applicant_type,full_name,phone,address,government_id_type,government_id_reference,veterinarian_name,veterinarian_clinic,veterinarian_contact,residence_proof_reference,pet_experience,household_consent,home_visit_consent,welfare_commitment,proof_document) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...values, document]);
     await run("UPDATE users SET verification_status='Under review' WHERE id=?", [req.session.user.id]);
     req.session.user.verification_status = 'Under review';
     flash(req, 'success', 'Verification application submitted. Review normally takes 3–5 working days.');

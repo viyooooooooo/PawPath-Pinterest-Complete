@@ -2,16 +2,32 @@ const bcrypt = require('bcryptjs');
 const { run, get, initialiseDatabase } = require('./database');
 
 const people = [
-  ['Aarohi Mehta','aarohi@pawpath.local','Independent rescuer','Vijay Nagar, Indore','Coordinates vaccination drives and patient foster homes for Indies.','https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=500&q=80'],
-  ['Dr Kabir Shah','kabir@pawpath.local','Veterinarian','Palasia, Indore','Small-animal veterinarian supporting emergency triage and post-operative care.','https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=500&q=80'],
-  ['Naina Verma','naina@pawpath.local','Verified adopter','Bhawarkua, Indore','Experienced pet parent with a calm home and a soft spot for senior dogs.','https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=500&q=80'],
-  ['Rohan Kulkarni','rohan@pawpath.local','Foster volunteer','Scheme 54, Indore','Short-term foster for puppies and injured community dogs.','https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=500&q=80'],
-  ['Isha Nair','isha@pawpath.local','Community feeder','Rau, Indore','Runs a documented feeding and sterilisation route across three neighbourhoods.','https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=500&q=80'],
-  ['Dev Malhotra','dev@pawpath.local','Transport volunteer','Sudama Nagar, Indore','Provides safe transport to clinics and foster homes after college hours.','https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=500&q=80'],
-  ['Meera Joshi','meera@pawpath.local','Verified adopter','Bengali Square, Indore','Cat parent and adoption counsellor focused on indoor-home readiness.','https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=500&q=80'],
-  ['Arjun Rao','arjun@pawpath.local','Independent rescuer','IIM Indore Road','Documents rescue cases and coordinates treatment fundraising transparently.','https://images.unsplash.com/photo-1507591064344-4c6ce005b128?auto=format&fit=crop&w=500&q=80'],
-  ['Sana Khan','sana@pawpath.local','Foster volunteer','Annapurna, Indore','Quiet foster home for recovering cats and small dogs.','https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=500&q=80'],
-  ['Dr Rhea Kapoor','rhea@pawpath.local','Veterinarian','Geeta Bhawan, Indore','Veterinary surgeon reviewing urgent cases and adopter medical preparedness.','https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=500&q=80']
+  ['Aarohi Mehta','aarohi@pawpath.local','Independent rescuer','Vijay Nagar, Indore','Coordinates vaccination drives and patient foster homes for Indies.',''],
+  ['Dr Kabir Shah','kabir@pawpath.local','Veterinarian','Palasia, Indore','Small-animal veterinarian supporting emergency triage and post-operative care.',''],
+  ['Naina Verma','naina@pawpath.local','Verified adopter','Bhawarkua, Indore','Experienced pet parent with a calm home and a soft spot for senior dogs.',''],
+  ['Rohan Kulkarni','rohan@pawpath.local','Foster volunteer','Scheme 54, Indore','Short-term foster for puppies and injured community dogs.',''],
+  ['Isha Nair','isha@pawpath.local','Community feeder','Rau, Indore','Runs a documented feeding and sterilisation route across three neighbourhoods.',''],
+  ['Dev Malhotra','dev@pawpath.local','Transport volunteer','Sudama Nagar, Indore','Provides safe transport to clinics and foster homes after college hours.',''],
+  ['Meera Joshi','meera@pawpath.local','Verified adopter','Bengali Square, Indore','Cat parent and adoption counsellor focused on indoor-home readiness.',''],
+  ['Arjun Rao','arjun@pawpath.local','Independent rescuer','IIM Indore Road','Documents rescue cases and coordinates treatment fundraising transparently.',''],
+  ['Sana Khan','sana@pawpath.local','Foster volunteer','Annapurna, Indore','Quiet foster home for recovering cats and small dogs.',''],
+  ['Dr Rhea Kapoor','rhea@pawpath.local','Veterinarian','Geeta Bhawan, Indore','Veterinary surgeon reviewing urgent cases and adopter medical preparedness.','']
+];
+
+function entityType(role) {
+  return role === 'Veterinarian' ? 'Veterinarian / vet clinic' : 'Volunteer / rescuer';
+}
+
+const dogPhotos = [
+  'https://commons.wikimedia.org/wiki/Special:FilePath/Indian%20Pariah%20Dog%20on%20the%20streets%20of%20Mumbai%2C%20India.jpg?width=900',
+  'https://commons.wikimedia.org/wiki/Special:FilePath/Indian%20Street%20Dog.jpg?width=900',
+  'https://commons.wikimedia.org/wiki/Special:FilePath/Indian%20street%20dog%20-%20female.jpg?width=900',
+  'https://commons.wikimedia.org/wiki/Special:FilePath/Indian%20Street%20dogs%20in%20Jaipur.jpg?width=900'
+];
+const catPhotos = [
+  'https://commons.wikimedia.org/wiki/Special:FilePath/Stray%20Cat%20India.jpg?width=900',
+  'https://commons.wikimedia.org/wiki/Special:FilePath/Cat%20in%20%27Joggers%20Park%27%20in%20Mumbai..JPG?width=900',
+  'https://commons.wikimedia.org/wiki/Special:FilePath/Beautiful%20stray%20cat.jpg?width=900'
 ];
 
 const listings = [
@@ -36,9 +52,10 @@ async function seed() {
   for (const person of people) {
     let user = await get('SELECT id FROM users WHERE email=?', [person[1]]);
     if (!user) {
-      const result = await run(`INSERT INTO users (username,email,password_hash,role,locality,bio,profile_photo,verification_status,verified_at) VALUES (?,?,?,?,?,?,?,'Verified',CURRENT_TIMESTAMP)`, [person[0],person[1],passwordHash,person[2],person[3],person[4],person[5]]);
+      const result = await run(`INSERT INTO users (username,email,password_hash,role,locality,bio,profile_photo,entity_type,verification_status,verified_at) VALUES (?,?,?,?,?,?,?,?, 'Verified',CURRENT_TIMESTAMP)`, [person[0],person[1],passwordHash,person[2],person[3],person[4],person[5],entityType(person[2])]);
       user = { id: result.id };
     }
+    await run('UPDATE users SET profile_photo=?, entity_type=? WHERE id=?', ['', entityType(person[2]), user.id]);
     ids.push(user.id);
   }
   await run('UPDATE users SET is_admin=1 WHERE email=?', ['aarohi@pawpath.local']);
@@ -48,6 +65,11 @@ async function seed() {
       const [owner,...animal] = item;
       await run(`INSERT INTO animals (user_id,name,species,gender,age,size,colour,temperament,vaccinated,sterilised,medical_notes,locality,urgency,category,status,photo_url,description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [ids[owner],...animal]);
     }
+  }
+  for (let index = 0; index < listings.length; index += 1) {
+    const item = listings[index];
+    const photo = item[2] === 'Dog' ? dogPhotos[index % dogPhotos.length] : catPhotos[index % catPhotos.length];
+    await run('UPDATE animals SET photo_url=? WHERE name=? AND user_id=?', [photo, item[1], ids[item[0]]]);
   }
   console.log('PawPath seed ready: 10 verified demo profiles. Password for each: PawPath123');
 }

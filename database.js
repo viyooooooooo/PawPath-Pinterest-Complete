@@ -91,6 +91,10 @@ async function initialiseDatabase() {
     id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'Community member', bio TEXT, locality TEXT,
     profile_photo TEXT, verification_status TEXT NOT NULL DEFAULT 'Unverified', verified_at TEXT, is_admin INTEGER NOT NULL DEFAULT 0,
+    entity_type TEXT NOT NULL DEFAULT 'Volunteer / rescuer', organisation_name TEXT,
+    phone TEXT, show_phone INTEGER NOT NULL DEFAULT 0, public_email TEXT, show_public_email INTEGER NOT NULL DEFAULT 0,
+    instagram_handle TEXT, show_instagram INTEGER NOT NULL DEFAULT 0, website TEXT, show_website INTEGER NOT NULL DEFAULT 0,
+    verification_document TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`);
   await addColumn('users', "role TEXT NOT NULL DEFAULT 'Community member'");
@@ -100,6 +104,17 @@ async function initialiseDatabase() {
   await addColumn('users', "verification_status TEXT NOT NULL DEFAULT 'Unverified'");
   await addColumn('users', 'verified_at TEXT');
   await addColumn('users', 'is_admin INTEGER NOT NULL DEFAULT 0');
+  await addColumn('users', "entity_type TEXT NOT NULL DEFAULT 'Volunteer / rescuer'");
+  await addColumn('users', 'organisation_name TEXT');
+  await addColumn('users', 'phone TEXT');
+  await addColumn('users', 'show_phone INTEGER NOT NULL DEFAULT 0');
+  await addColumn('users', 'public_email TEXT');
+  await addColumn('users', 'show_public_email INTEGER NOT NULL DEFAULT 0');
+  await addColumn('users', 'instagram_handle TEXT');
+  await addColumn('users', 'show_instagram INTEGER NOT NULL DEFAULT 0');
+  await addColumn('users', 'website TEXT');
+  await addColumn('users', 'show_website INTEGER NOT NULL DEFAULT 0');
+  await addColumn('users', 'verification_document TEXT');
 
   await run(`CREATE TABLE IF NOT EXISTS animals (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, species TEXT NOT NULL,
@@ -134,9 +149,11 @@ async function initialiseDatabase() {
     veterinarian_contact TEXT NOT NULL, residence_proof_reference TEXT NOT NULL, pet_experience TEXT NOT NULL,
     household_consent TEXT NOT NULL, home_visit_consent TEXT NOT NULL, welfare_commitment TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'Under review', reviewer_notes TEXT,
+    proof_document TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
+  await addColumn('verification_applications', 'proof_document TEXT');
 
   await run(`CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
