@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { run, get, initialiseDatabase } = require('./database');
+const { seedDirectory } = require('./directory-seed');
 
 const people = [
   ['Aarohi Mehta','aarohi@pawpath.local','Independent rescuer','Vijay Nagar, Indore','Coordinates vaccination drives and patient foster homes for Indies.',''],
@@ -71,6 +72,7 @@ async function seed() {
     const photo = item[2] === 'Dog' ? dogPhotos[index % dogPhotos.length] : catPhotos[index % catPhotos.length];
     await run('UPDATE animals SET photo_url=? WHERE name=? AND user_id=?', [photo, item[1], ids[item[0]]]);
   }
+  await seedDirectory();
   console.log('PawPath seed ready: 10 verified demo profiles. Password for each: PawPath123');
 }
 

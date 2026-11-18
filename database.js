@@ -24,7 +24,12 @@ function postgresSql(sql) {
 const run = async (sql, params = []) => {
   if (usingPostgres) {
     let query = postgresSql(sql);
-    if (/^\s*INSERT\s+INTO/i.test(query) && !/\bRETURNING\b/i.test(query)) query += ' RETURNING id';
+    // Most application tables use an integer `id`, but the directory import
+    // tracking table is keyed by `source_version`. Asking PostgreSQL to return
+    // a nonexistent `id` made the otherwise-successful India import fail at
+    // its final bookkeeping step and prevented the web server from starting.
+    const insertsDirectoryImport = /^\s*INSERT\s+INTO\s+directory_imports\b/i.test(query);
+    if (/^\s*INSERT\s+INTO/i.test(query) && !/\bRETURNING\b/i.test(query) && !insertsDirectoryImport) query += ' RETURNING id';
     const result = await pool.query(query, params);
     return { id: result.rows[0]?.id, changes: result.rowCount };
   }
@@ -115,6 +120,44 @@ async function initialiseDatabase() {
   await addColumn('users', 'website TEXT');
   await addColumn('users', 'show_website INTEGER NOT NULL DEFAULT 0');
   await addColumn('users', 'verification_document TEXT');
+
+  // Public directory records are kept separate from PawPath accounts. Imported
+  // contacts cannot log in or receive in-app messages, and their source status
+  // is never presented as PawPath identity verification.
+  await run(`CREATE TABLE IF NOT EXISTS directory_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_key TEXT NOT NULL UNIQUE,
+    category TEXT NOT NULL,
+    name TEXT NOT NULL,
+    subtype TEXT,
+    city TEXT,
+    state TEXT,
+    address TEXT,
+    phone_primary TEXT,
+    phone_secondary TEXT,
+    email TEXT,
+    services TEXT,
+    notes TEXT,
+    trust_status TEXT NOT NULL DEFAULT 'source_listed',
+    source_url TEXT,
+    source_checked_on TEXT,
+    awbi_code TEXT,
+    listing_readiness TEXT,
+    accepts_dogs INTEGER,
+    accepts_cats INTEGER,
+    accepts_stray_cases INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await run('CREATE INDEX IF NOT EXISTS idx_directory_category ON directory_entries (category)');
+  await run('CREATE INDEX IF NOT EXISTS idx_directory_state_city ON directory_entries (state, city)');
+  await run('CREATE INDEX IF NOT EXISTS idx_directory_trust ON directory_entries (trust_status)');
+
+  await run(`CREATE TABLE IF NOT EXISTS directory_imports (
+    source_version TEXT PRIMARY KEY,
+    record_count INTEGER NOT NULL,
+    imported_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
 
   await run(`CREATE TABLE IF NOT EXISTS animals (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, species TEXT NOT NULL,

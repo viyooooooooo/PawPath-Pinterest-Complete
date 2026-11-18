@@ -1,0 +1,33 @@
+<%- include('partials/header') %>
+<% const trustLabel = entry.trust_status === 'source_verified' ? 'Source checked' : entry.trust_status === 'official_source' ? 'Official source' : entry.listing_readiness === 'service_verified' ? 'Rescue services confirmed' : 'AWBI recognised'; %>
+<section class="directory-detail-hero">
+  <a class="text-link" href="/profiles">← Back to Network</a>
+  <div class="directory-detail-heading">
+    <div class="profile-initials directory-detail-initial"><%= entry.name.charAt(0).toUpperCase() %></div>
+    <div><span class="trust-badge trust-<%= entry.trust_status.replaceAll('_','-') %>"><%= trustLabel %></span><h1><%= entry.name %></h1><p class="profile-role"><%= String(entry.subtype || '').replaceAll('_',' ') %> · <%= [entry.city, entry.state].filter(Boolean).join(', ') || 'Location not listed' %></p><% if (entry.awbi_code) { %><p class="directory-code">AWBI code <strong><%= entry.awbi_code %></strong></p><% } %></div>
+  </div>
+</section>
+
+<section class="directory-detail-grid section">
+  <article class="directory-detail-card">
+    <span class="kicker">SERVICES AND NOTES</span>
+    <h2>What this record says</h2>
+    <p><%= entry.services || 'No service description is available.' %></p>
+    <% if (entry.notes) { %><p><%= entry.notes %></p><% } %>
+    <% if (entry.address) { %><div class="directory-field"><span>Address</span><strong><%= entry.address %></strong></div><% } %>
+    <% if (entry.listing_readiness === 'needs_service_verification') { %><div class="directory-warning"><strong>Services not yet confirmed</strong><p>AWBI recognition establishes that this organisation appears on the official register. It does not confirm current dog/cat rescue services, capacity or emergency availability.</p></div><% } %>
+  </article>
+  <aside class="directory-contact-card">
+    <span class="kicker">CONTACT AND SOURCE</span>
+    <h2>Confirm before relying on this record</h2>
+    <div class="directory-contact-list">
+      <% if (entry.phone_primary) { %><a href="tel:<%= entry.phone_primary %>"><span>Primary phone</span><strong><%= entry.phone_primary %></strong></a><% } %>
+      <% if (entry.phone_secondary) { String(entry.phone_secondary).split(';').filter(Boolean).forEach(phone => { %><a href="tel:<%= phone.trim() %>"><span>Additional phone</span><strong><%= phone.trim() %></strong></a><% }) } %>
+      <% if (entry.email) { %><a href="mailto:<%= entry.email %>"><span>Email</span><strong><%= entry.email %></strong></a><% } %>
+      <% if (!entry.phone_primary && !entry.phone_secondary && !entry.email) { %><p class="muted">No public phone or email was present in the supplied source.</p><% } %>
+    </div>
+    <% if (entry.source_url) { %><a class="button button-soft" href="<%= entry.source_url %>" target="_blank" rel="noopener">Open original source ↗</a><% } %>
+    <% if (entry.source_checked_on) { %><small>Source date: <%= entry.source_checked_on %></small><% } %>
+  </aside>
+</section>
+<%- include('partials/footer') %>

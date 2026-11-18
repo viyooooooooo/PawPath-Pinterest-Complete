@@ -35,6 +35,70 @@ const networkGroups = {
   vets: { label: 'Veterinarians & vet clinics', values: ['Veterinarian / vet clinic'] },
   organisations: { label: 'Shelters, NGOs & rescue organisations', values: ['Shelter / NGO / rescue organisation'] }
 };
+const NETWORK_PAGE_SIZE = 24;
+const networkDirectoryCte = `WITH network AS (
+  SELECT
+    'user' AS source_type,
+    CAST(users.id AS TEXT) AS record_id,
+    users.username AS name,
+    CASE
+      WHEN users.entity_type='Veterinarian / vet clinic' THEN 'vets'
+      WHEN users.entity_type='Shelter / NGO / rescue organisation' THEN 'organisations'
+      ELSE 'volunteers'
+    END AS category,
+    COALESCE(users.entity_type, users.role) AS subtype,
+    '' AS city,
+    '' AS state,
+    COALESCE(users.locality, '') AS location,
+    COALESCE(users.bio, '') AS description,
+    CASE WHEN users.show_phone=1 THEN COALESCE(users.phone, '') ELSE '' END AS phone_primary,
+    '' AS phone_secondary,
+    CASE WHEN users.show_public_email=1 THEN COALESCE(users.public_email, '') ELSE '' END AS public_email,
+    CASE WHEN users.show_website=1 THEN COALESCE(users.website, '') ELSE '' END AS website,
+    CASE WHEN users.show_instagram=1 THEN COALESCE(users.instagram_handle, '') ELSE '' END AS instagram_handle,
+    '' AS source_url,
+    users.verification_status AS trust_status,
+    '' AS source_checked_on,
+    '' AS awbi_code,
+    '' AS listing_readiness,
+    users.profile_photo AS profile_photo,
+    users.organisation_name AS organisation_name,
+    users.role AS role,
+    COUNT(animals.id) AS listing_count
+  FROM users
+  LEFT JOIN animals ON animals.user_id=users.id
+  GROUP BY users.id
+  UNION ALL
+  SELECT
+    'directory' AS source_type,
+    CAST(directory_entries.id AS TEXT) AS record_id,
+    directory_entries.name,
+    directory_entries.category,
+    COALESCE(directory_entries.subtype, '') AS subtype,
+    COALESCE(directory_entries.city, '') AS city,
+    COALESCE(directory_entries.state, '') AS state,
+    CASE
+      WHEN COALESCE(directory_entries.city, '')='' THEN COALESCE(directory_entries.state, '')
+      WHEN COALESCE(directory_entries.state, '')='' THEN directory_entries.city
+      ELSE directory_entries.city || ', ' || directory_entries.state
+    END AS location,
+    COALESCE(directory_entries.services, '') AS description,
+    COALESCE(directory_entries.phone_primary, '') AS phone_primary,
+    COALESCE(directory_entries.phone_secondary, '') AS phone_secondary,
+    COALESCE(directory_entries.email, '') AS public_email,
+    '' AS website,
+    '' AS instagram_handle,
+    COALESCE(directory_entries.source_url, '') AS source_url,
+    directory_entries.trust_status,
+    COALESCE(directory_entries.source_checked_on, '') AS source_checked_on,
+    COALESCE(directory_entries.awbi_code, '') AS awbi_code,
+    COALESCE(directory_entries.listing_readiness, '') AS listing_readiness,
+    '' AS profile_photo,
+    '' AS organisation_name,
+    directory_entries.subtype AS role,
+    0 AS listing_count
+  FROM directory_entries
+)`;
 
 function safeWebsite(value) {
   const text = String(value || '').trim();
@@ -139,19 +203,58 @@ app.get('/community', (req, res) => res.redirect('/animals?category=Community%20
 
 app.get('/profiles', async (req, res, next) => {
   try {
-    const status = req.query.status || 'Verified';
-    const role = req.query.role || '';
+    const q = String(req.query.q || '').trim();
+    const trust = ['all', 'pawpath', 'source_checked', 'awbi', 'service_verified'].includes(req.query.trust) ? req.query.trust : 'all';
+    const state = String(req.query.state || '').trim();
     const group = networkGroups[req.query.group] ? req.query.group : '';
-    const clauses = status ? ['users.verification_status = ?'] : [];
-    const params = status ? [status] : [];
-    if (req.session.user) { clauses.push('users.id != ?'); params.push(req.session.user.id); }
-    if (role) { clauses.push('users.role = ?'); params.push(role); }
-    if (group) {
-      clauses.push(`users.entity_type IN (${networkGroups[group].values.map(() => '?').join(',')})`);
-      params.push(...networkGroups[group].values);
+    const requestedPage = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const clauses = [];
+    const params = [];
+    if (req.session.user) { clauses.push("NOT (source_type='user' AND record_id=?)"); params.push(String(req.session.user.id)); }
+    if (group) { clauses.push('category=?'); params.push(group); }
+    if (state) { clauses.push('state=?'); params.push(state); }
+    if (q) {
+      const search = `%${q.toLowerCase()}%`;
+      clauses.push('(LOWER(name) LIKE ? OR LOWER(location) LIKE ? OR LOWER(description) LIKE ? OR LOWER(awbi_code) LIKE ?)');
+      params.push(search, search, search, search);
     }
-    const profiles = await all(`SELECT users.*, COUNT(animals.id) AS listing_count FROM users LEFT JOIN animals ON animals.user_id=users.id ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} GROUP BY users.id ORDER BY CASE users.verification_status WHEN 'Verified' THEN 1 WHEN 'Under review' THEN 2 ELSE 3 END, listing_count DESC, users.username`, params);
-    res.render('profiles', { title: 'Verified network | PawPath', profiles, filters: { status, role, group }, networkGroups });
+    if (trust === 'pawpath') clauses.push("source_type='user' AND trust_status='Verified'");
+    if (trust === 'source_checked') clauses.push("source_type='directory' AND trust_status IN ('source_verified','official_source')");
+    if (trust === 'awbi') clauses.push("source_type='directory' AND trust_status='awbi_recognised'");
+    if (trust === 'service_verified') clauses.push("source_type='directory' AND listing_readiness='service_verified'");
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const count = await get(`${networkDirectoryCte} SELECT COUNT(*) AS count FROM network ${where}`, params);
+    const total = Number(count.count || 0);
+    const totalPages = Math.max(1, Math.ceil(total / NETWORK_PAGE_SIZE));
+    const page = Math.min(requestedPage, totalPages);
+    const profiles = await all(`${networkDirectoryCte}
+      SELECT * FROM network ${where}
+      ORDER BY CASE source_type WHEN 'user' THEN 1 ELSE 2 END,
+        CASE trust_status WHEN 'Verified' THEN 1 WHEN 'source_verified' THEN 2 WHEN 'official_source' THEN 3 WHEN 'awbi_recognised' THEN 4 ELSE 5 END,
+        name
+      LIMIT ? OFFSET ?`, [...params, NETWORK_PAGE_SIZE, (page - 1) * NETWORK_PAGE_SIZE]);
+    const states = await all("SELECT DISTINCT state FROM directory_entries WHERE COALESCE(state,'')!='' ORDER BY state");
+    const groupCounts = await all(`${networkDirectoryCte} SELECT category, COUNT(*) AS count FROM network GROUP BY category`);
+    const counts = Object.fromEntries(groupCounts.map((item) => [item.category, Number(item.count)]));
+    const pageUrl = (number) => {
+      const query = new URLSearchParams();
+      if (q) query.set('q', q);
+      if (group) query.set('group', group);
+      if (state) query.set('state', state);
+      if (trust !== 'all') query.set('trust', trust);
+      if (number > 1) query.set('page', String(number));
+      return `/profiles${query.toString() ? `?${query}` : ''}`;
+    };
+    res.render('profiles', { title: 'Network | PawPath', profiles, filters: { q, trust, state, group }, networkGroups, states, counts, total, page, totalPages, pageUrl });
+  } catch (error) { next(error); }
+});
+
+app.get('/directory/:id', async (req, res, next) => {
+  try {
+    const entry = await get('SELECT * FROM directory_entries WHERE id=?', [req.params.id]);
+    if (!entry) return res.status(404).render('error', { title: 'Directory record not found | PawPath', message: 'That network record does not exist.' });
+    entry.source_url = safeWebsite(entry.source_url);
+    res.render('directory-detail', { title: `${entry.name} | PawPath`, entry });
   } catch (error) { next(error); }
 });
 
