@@ -69,9 +69,10 @@ async function initialiseDatabase() {
     gender TEXT NOT NULL, age TEXT NOT NULL, size TEXT NOT NULL, colour TEXT NOT NULL, temperament TEXT NOT NULL,
     vaccinated TEXT NOT NULL, sterilised TEXT NOT NULL, medical_notes TEXT, locality TEXT NOT NULL,
     urgency TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Reported', photo_url TEXT,
-    description TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    description TEXT NOT NULL, contact_details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
+  await addColumn('animals', 'contact_details TEXT');
 
   await run(`CREATE TABLE IF NOT EXISTS applications (
     id INTEGER PRIMARY KEY AUTOINCREMENT, animal_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
@@ -98,6 +99,30 @@ async function initialiseDatabase() {
     status TEXT NOT NULL DEFAULT 'Under review', reviewer_notes TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+
+  await run(`CREATE TABLE IF NOT EXISTS conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id INTEGER NOT NULL,
+    initiator_id INTEGER NOT NULL,
+    recipient_id INTEGER NOT NULL,
+    compatibility_score INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(listing_id, initiator_id, recipient_id),
+    FOREIGN KEY (listing_id) REFERENCES animals(id) ON DELETE CASCADE,
+    FOREIGN KEY (initiator_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+
+  await run(`CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL,
+    sender_id INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
 }
 

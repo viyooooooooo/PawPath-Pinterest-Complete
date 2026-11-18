@@ -1,6 +1,7 @@
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
+const multer = require('multer');
 const { run, get, all, initialiseDatabase } = require('./database');
 
 const app = express();
@@ -14,6 +15,12 @@ app.set('view engine', 'ejs');
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 app.use(session({ secret: process.env.SESSION_SECRET || 'pawpath-local-demo-secret', resave: false, saveUninitialized: false, cookie: { maxAge: 1000 * 60 * 60 * 24 * 7, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' } }));
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024 },
+  fileFilter: (req, file, done) => done(/^image\//.test(file.mimetype) ? null : new Error('Please choose an image file.'), /^image\//.test(file.mimetype))
+});
 
 function freshCaptcha(req) {
   const first = Math.floor(Math.random() * 8) + 2;
@@ -36,11 +43,25 @@ function requireAdmin(req, res, next) {
 }
 function validateAnimal(body) {
   const errors = [];
-  const required = ['name', 'species', 'gender', 'age', 'size', 'colour', 'temperament', 'vaccinated', 'sterilised', 'locality', 'urgency', 'category', 'status', 'description'];
+  const required = ['name', 'locality'];
   required.forEach((field) => { if (!String(body[field] || '').trim()) errors.push(`${field.replace('_', ' ')} is required.`); });
-  if (String(body.description || '').trim().length < 20) errors.push('Description must be at least 20 characters.');
-  if (body.photo_url && !/^https?:\/\/.+/i.test(body.photo_url)) errors.push('Photo URL must begin with http:// or https://.');
   return errors;
+}
+
+function photoFromRequest(req, existingPhoto = '') {
+  if (req.body.remove_photo === 'on') return '';
+  if (req.file) return `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+  return existingPhoto;
+}
+
+function listingValues(body, photoUrl) {
+  return [
+    String(body.name || '').trim(), body.species || 'Unknown', body.gender || 'Unknown', String(body.age || '').trim() || 'Unknown',
+    body.size || 'Unknown', String(body.colour || '').trim() || 'Not added', String(body.temperament || '').trim() || 'Not added',
+    body.vaccinated || 'Unknown', body.sterilised || 'Unknown', String(body.medical_notes || '').trim(), String(body.locality || '').trim(),
+    body.urgency || 'Normal', body.category || 'Up for Adoption', body.status || 'Reported', photoUrl,
+    String(body.description || '').trim() || 'No description added yet.', String(body.contact_details || '').trim()
+  ];
 }
 function compatibility(body) {
   let score = 50;
@@ -48,6 +69,15 @@ function compatibility(body) {
   if (body.housing_type !== 'Hostel / shared room') score += 15;
   if (Number(body.working_hours) <= 8) score += 10;
   return Math.min(score, 95);
+}
+
+function listingMatchScore(listing, profile) {
+  let score = 56;
+  if (profile.verification_status === 'Verified') score += 18;
+  if (['Verified adopter', 'Foster volunteer', 'Independent rescuer'].includes(profile.role)) score += 10;
+  if (listing.category === 'Up for Adoption' && profile.role === 'Verified adopter') score += 9;
+  if (listing.category === 'Urgent Foster Needed' && profile.role === 'Foster volunteer') score += 9;
+  return Math.min(score, 96);
 }
 
 app.use((req, res, next) => {
@@ -97,7 +127,72 @@ app.get('/profiles/:id', async (req, res, next) => {
     const profile = await get('SELECT id, username, role, bio, locality, profile_photo, verification_status, verified_at, created_at FROM users WHERE id=?', [req.params.id]);
     if (!profile) return res.status(404).render('error', { title: 'Profile not found | PawPath', message: 'That community profile does not exist.' });
     const listings = await all("SELECT * FROM animals WHERE user_id=? ORDER BY CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, created_at DESC", [profile.id]);
-    res.render('profile-detail', { title: `${profile.username} | PawPath`, profile, listings });
+    const ownListings = req.session.user ? await all("SELECT * FROM animals WHERE user_id=? AND status NOT IN ('Adopted','Resolved') ORDER BY created_at DESC", [req.session.user.id]) : [];
+    const listingMatches = ownListings.map((listing) => ({ id: listing.id, score: listingMatchScore(listing, profile) }));
+    res.render('profile-detail', { title: `${profile.username} | PawPath`, profile, listings, ownListings, listingMatches });
+  } catch (error) { next(error); }
+});
+
+app.post('/profiles/:id/approach', requireLogin, async (req, res, next) => {
+  try {
+    const recipient = await get('SELECT id, username, role, verification_status FROM users WHERE id=?', [req.params.id]);
+    const listing = await get("SELECT * FROM animals WHERE id=? AND user_id=? AND status NOT IN ('Adopted','Resolved')", [req.body.listing_id, req.session.user.id]);
+    if (!recipient || recipient.id === req.session.user.id || recipient.verification_status !== 'Verified' || !listing) {
+      flash(req, 'error', 'Choose one of your active listings and a verified PawPath member.');
+      return res.redirect(`/profiles/${req.params.id}`);
+    }
+    const score = listingMatchScore(listing, recipient);
+    let conversation = await get('SELECT id FROM conversations WHERE listing_id=? AND initiator_id=? AND recipient_id=?', [listing.id, req.session.user.id, recipient.id]);
+    if (!conversation) {
+      const created = await run('INSERT INTO conversations (listing_id,initiator_id,recipient_id,compatibility_score) VALUES (?,?,?,?)', [listing.id, req.session.user.id, recipient.id, score]);
+      conversation = { id: created.id };
+      await run('INSERT INTO messages (conversation_id,sender_id,body) VALUES (?,?,?)', [conversation.id, req.session.user.id, `Hi ${recipient.username}, I think ${listing.name} could be a good match for your support. Would you be open to discussing this listing?`]);
+    }
+    flash(req, 'success', `Conversation started. Compatibility: ${score}%.`);
+    res.redirect(`/messages/${conversation.id}`);
+  } catch (error) { next(error); }
+});
+
+app.get('/messages', requireLogin, async (req, res, next) => {
+  try {
+    const conversations = await all(`SELECT conversations.*, animals.name AS listing_name,
+      CASE WHEN conversations.initiator_id=? THEN recipients.username ELSE initiators.username END AS other_username
+      FROM conversations
+      JOIN animals ON animals.id=conversations.listing_id
+      JOIN users AS initiators ON initiators.id=conversations.initiator_id
+      JOIN users AS recipients ON recipients.id=conversations.recipient_id
+      WHERE conversations.initiator_id=? OR conversations.recipient_id=?
+      ORDER BY conversations.updated_at DESC`, [req.session.user.id, req.session.user.id, req.session.user.id]);
+    res.render('messages', { title: 'Messages | PawPath', conversations });
+  } catch (error) { next(error); }
+});
+
+app.get('/messages/:id', requireLogin, async (req, res, next) => {
+  try {
+    const conversation = await get(`SELECT conversations.*, animals.name AS listing_name,
+      initiators.username AS initiator_name, recipients.username AS recipient_name
+      FROM conversations JOIN animals ON animals.id=conversations.listing_id
+      JOIN users AS initiators ON initiators.id=conversations.initiator_id
+      JOIN users AS recipients ON recipients.id=conversations.recipient_id
+      WHERE conversations.id=?`, [req.params.id]);
+    if (!conversation || (conversation.initiator_id !== req.session.user.id && conversation.recipient_id !== req.session.user.id)) {
+      flash(req, 'error', 'That conversation is not available to you.'); return res.redirect('/messages');
+    }
+    const messages = await all(`SELECT messages.*, users.username FROM messages JOIN users ON users.id=messages.sender_id WHERE conversation_id=? ORDER BY messages.created_at ASC, messages.id ASC`, [conversation.id]);
+    const otherName = conversation.initiator_id === req.session.user.id ? conversation.recipient_name : conversation.initiator_name;
+    res.render('conversation', { title: `Chat with ${otherName} | PawPath`, conversation, messages, otherName, errors: [] });
+  } catch (error) { next(error); }
+});
+
+app.post('/messages/:id', requireLogin, async (req, res, next) => {
+  try {
+    const conversation = await get('SELECT * FROM conversations WHERE id=?', [req.params.id]);
+    if (!conversation || (conversation.initiator_id !== req.session.user.id && conversation.recipient_id !== req.session.user.id)) return res.redirect('/messages');
+    const body = String(req.body.body || '').trim();
+    if (!body || body.length > 1500) { flash(req, 'error', 'Write a message between 1 and 1,500 characters.'); return res.redirect(`/messages/${conversation.id}`); }
+    await run('INSERT INTO messages (conversation_id,sender_id,body) VALUES (?,?,?)', [conversation.id, req.session.user.id, body]);
+    await run('UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?', [conversation.id]);
+    res.redirect(`/messages/${conversation.id}`);
   } catch (error) { next(error); }
 });
 
@@ -116,12 +211,13 @@ app.get('/animals', async (req, res, next) => {
 });
 
 app.get('/animals/new', requireLogin, (req, res) => res.render('animal-form', { title: 'Report a Stray | PawPath', animal: {}, action: '/animals', formTitle: 'Create an animal profile', errors: [] }));
-app.post('/animals', requireLogin, async (req, res, next) => {
+app.post('/animals', requireLogin, upload.single('photo'), async (req, res, next) => {
   const errors = validateAnimal(req.body);
-  if (errors.length) return res.status(400).render('animal-form', { title: 'Fix listing details | PawPath', animal: req.body, action: '/animals', formTitle: 'Create an animal profile', errors });
+  const uploadedPhoto = photoFromRequest(req);
+  if (errors.length) return res.status(400).render('animal-form', { title: 'Fix listing details | PawPath', animal: { ...req.body, photo_url: uploadedPhoto }, action: '/animals', formTitle: 'Create an animal profile', errors });
   try {
     const b = req.body;
-    const result = await run(`INSERT INTO animals (user_id,name,species,gender,age,size,colour,temperament,vaccinated,sterilised,medical_notes,locality,urgency,category,status,photo_url,description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, b.name.trim(), b.species, b.gender, b.age.trim(), b.size, b.colour.trim(), b.temperament.trim(), b.vaccinated, b.sterilised, b.medical_notes.trim(), b.locality.trim(), b.urgency, b.category, b.status, b.photo_url.trim(), b.description.trim()]);
+    const result = await run(`INSERT INTO animals (user_id,name,species,gender,age,size,colour,temperament,vaccinated,sterilised,medical_notes,locality,urgency,category,status,photo_url,description,contact_details) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...listingValues(b, uploadedPhoto)]);
     flash(req, 'success', 'Animal profile created—thank you for taking action.');
     res.redirect(`/animals/${result.id}`);
   } catch (error) { next(error); }
@@ -143,14 +239,15 @@ app.get('/animals/:id/edit', requireLogin, async (req, res, next) => {
     res.render('animal-form', { title: `Edit ${animal.name} | PawPath`, animal, action: `/animals/${animal.id}/edit`, formTitle: `Edit ${animal.name}'s profile`, errors: [] });
   } catch (error) { next(error); }
 });
-app.post('/animals/:id/edit', requireLogin, async (req, res, next) => {
+app.post('/animals/:id/edit', requireLogin, upload.single('photo'), async (req, res, next) => {
   const errors = validateAnimal(req.body);
   const existing = await get('SELECT * FROM animals WHERE id = ?', [req.params.id]);
   if (!existing || existing.user_id !== req.session.user.id) { flash(req, 'error', 'You can only edit your own listings.'); return res.redirect('/dashboard'); }
-  if (errors.length) return res.status(400).render('animal-form', { title: 'Fix listing details | PawPath', animal: { ...req.body, id: req.params.id }, action: `/animals/${req.params.id}/edit`, formTitle: `Edit ${existing.name}'s profile`, errors });
+  const uploadedPhoto = photoFromRequest(req, existing.photo_url);
+  if (errors.length) return res.status(400).render('animal-form', { title: 'Fix listing details | PawPath', animal: { ...existing, ...req.body, id: req.params.id, photo_url: uploadedPhoto }, action: `/animals/${req.params.id}/edit`, formTitle: `Edit ${existing.name}'s profile`, errors });
   try {
     const b = req.body;
-    await run(`UPDATE animals SET name=?,species=?,gender=?,age=?,size=?,colour=?,temperament=?,vaccinated=?,sterilised=?,medical_notes=?,locality=?,urgency=?,category=?,status=?,photo_url=?,description=? WHERE id=?`, [b.name.trim(), b.species, b.gender, b.age.trim(), b.size, b.colour.trim(), b.temperament.trim(), b.vaccinated, b.sterilised, b.medical_notes.trim(), b.locality.trim(), b.urgency, b.category, b.status, b.photo_url.trim(), b.description.trim(), existing.id]);
+    await run(`UPDATE animals SET name=?,species=?,gender=?,age=?,size=?,colour=?,temperament=?,vaccinated=?,sterilised=?,medical_notes=?,locality=?,urgency=?,category=?,status=?,photo_url=?,description=?,contact_details=? WHERE id=?`, [...listingValues(b, uploadedPhoto), existing.id]);
     flash(req, 'success', 'Animal profile updated.'); res.redirect(`/animals/${existing.id}`);
   } catch (error) { next(error); }
 });
@@ -287,6 +384,6 @@ app.post('/admin/verifications/:id/decision', requireLogin, requireAdmin, async 
 });
 
 app.use((req, res) => res.status(404).render('error', { title: 'Page not found | PawPath', message: 'This path does not exist. Let’s get you back to helping animals.' }));
-app.use((error, req, res, next) => { console.error(error); res.status(500).render('error', { title: 'Something went wrong | PawPath', message: 'Please try again. If the issue continues, restart the local server.' }); });
+app.use((error, req, res, next) => { console.error(error); const message = error.code === 'LIMIT_FILE_SIZE' ? 'Please choose a photo smaller than 4 MB.' : error.message === 'Please choose an image file.' ? error.message : 'Please try again. If the issue continues, restart the local server.'; res.status(500).render('error', { title: 'Something went wrong | PawPath', message }); });
 
 initialiseDatabase().then(() => app.listen(PORT, () => console.log(`PawPath is running at http://localhost:${PORT}`)));
