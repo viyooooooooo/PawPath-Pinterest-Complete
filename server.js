@@ -116,6 +116,7 @@ app.get('/profiles', async (req, res, next) => {
     const role = req.query.role || '';
     const clauses = status ? ['users.verification_status = ?'] : [];
     const params = status ? [status] : [];
+    if (req.session.user) { clauses.push('users.id != ?'); params.push(req.session.user.id); }
     if (role) { clauses.push('users.role = ?'); params.push(role); }
     const profiles = await all(`SELECT users.*, COUNT(animals.id) AS listing_count FROM users LEFT JOIN animals ON animals.user_id=users.id ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} GROUP BY users.id ORDER BY CASE users.verification_status WHEN 'Verified' THEN 1 WHEN 'Under review' THEN 2 ELSE 3 END, listing_count DESC, users.username`, params);
     res.render('profiles', { title: 'Verified people | PawPath', profiles, filters: { status, role } });
@@ -126,6 +127,7 @@ app.get('/profiles/:id', async (req, res, next) => {
   try {
     const profile = await get('SELECT id, username, role, bio, locality, profile_photo, verification_status, verified_at, created_at FROM users WHERE id=?', [req.params.id]);
     if (!profile) return res.status(404).render('error', { title: 'Profile not found | PawPath', message: 'That community profile does not exist.' });
+    if (req.session.user && profile.id === req.session.user.id) return res.redirect('/dashboard');
     const listings = await all("SELECT * FROM animals WHERE user_id=? ORDER BY CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, created_at DESC", [profile.id]);
     const ownListings = req.session.user ? await all("SELECT * FROM animals WHERE user_id=? AND status NOT IN ('Adopted','Resolved') ORDER BY created_at DESC", [req.session.user.id]) : [];
     const listingMatches = ownListings.map((listing) => ({ id: listing.id, score: listingMatchScore(listing, profile) }));
@@ -144,6 +146,7 @@ app.post('/profiles/:id/chat', requireLogin, async (req, res, next) => {
     if (req.body.listing_id) {
       listing = await get("SELECT * FROM animals WHERE id=? AND user_id=? AND status NOT IN ('Adopted','Resolved')", [req.body.listing_id, req.session.user.id]);
       if (!listing) { flash(req, 'error', 'Please choose one of your active listings.'); return res.redirect(`/profiles/${req.params.id}`); }
+      if (String(req.body.message || '').trim().length < 12) { flash(req, 'error', 'Please briefly explain why this animal could be a good fit.'); return res.redirect(`/profiles/${req.params.id}#contact`); }
     }
     const score = listing ? listingMatchScore(listing, recipient) : 0;
     const topic = listing ? `About ${listing.name}` : 'General question';
