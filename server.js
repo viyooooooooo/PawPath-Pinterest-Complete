@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 app.set('view engine', 'ejs');
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
-app.use(session({ secret: 'pawpath-local-demo-secret', resave: false, saveUninitialized: false }));
+app.use(session({ secret: process.env.SESSION_SECRET || 'pawpath-local-demo-secret', resave: false, saveUninitialized: false, cookie: { maxAge: 1000 * 60 * 60 * 24 * 7, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' } }));
 
 function freshCaptcha(req) {
   const first = Math.floor(Math.random() * 8) + 2;
@@ -24,6 +24,10 @@ function captchaOk(req, answer) {
 function flash(req, type, text) { req.session.flash = { type, text }; }
 function requireLogin(req, res, next) {
   if (!req.session.user) { flash(req, 'error', 'Please log in to continue.'); return res.redirect('/login'); }
+  next();
+}
+function requireAdmin(req, res, next) {
+  if (!req.session.user?.is_admin) { flash(req, 'error', 'Reviewer access is required.'); return res.redirect('/dashboard'); }
   next();
 }
 function validateAnimal(body) {
@@ -55,16 +59,43 @@ app.get('/', async (req, res, next) => {
   try {
     const urgent = await all(`SELECT * FROM animals WHERE urgency IN ('Critical', 'Needs Help Today') AND status NOT IN ('Adopted', 'Resolved') ORDER BY CASE urgency WHEN 'Critical' THEN 1 ELSE 2 END, created_at DESC LIMIT 3`);
     const stats = await get(`SELECT COUNT(*) AS animals, SUM(CASE WHEN urgency = 'Critical' AND status NOT IN ('Adopted', 'Resolved') THEN 1 ELSE 0 END) AS urgent, SUM(CASE WHEN status = 'Adopted' THEN 1 ELSE 0 END) AS adopted FROM animals`);
-    const animals = await all(`SELECT * FROM animals ORDER BY CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, created_at DESC LIMIT 10`);
+    const animals = await all(`SELECT animals.*, users.username, users.verification_status FROM animals JOIN users ON users.id=animals.user_id ORDER BY CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, animals.created_at DESC LIMIT 10`);
+    const profiles = await all(`SELECT users.*, COUNT(animals.id) AS listing_count FROM users LEFT JOIN animals ON animals.user_id=users.id WHERE users.verification_status='Verified' GROUP BY users.id ORDER BY listing_count DESC, users.username LIMIT 6`);
     const stories = await all(`SELECT rescue_updates.*, animals.name AS animal_name, animals.photo_url FROM rescue_updates JOIN animals ON animals.id = rescue_updates.animal_id ORDER BY rescue_updates.created_at DESC LIMIT 3`);
-    res.render('home', { title: 'PawPath | Find a friend. Offer a safe pause.', urgent, stats, animals, stories });
+    res.render('home', { title: 'PawPath | Rescue, foster and adopt responsibly', urgent, stats, animals, stories, profiles });
   } catch (error) { next(error); }
 });
 
 // Focused discovery pages keep each help flow simple instead of crowding one screen.
-app.get('/sos', (req, res) => res.redirect('/animals?category=Medical%20%2F%20Rescue%20SOS&urgency=Critical'));
+app.get('/sos', async (req, res, next) => {
+  try {
+    const animals = await all(`SELECT animals.*, users.username, users.verification_status FROM animals JOIN users ON users.id=animals.user_id WHERE animals.urgency IN ('Critical','Needs Help Today') AND animals.status NOT IN ('Adopted','Resolved') ORDER BY CASE animals.urgency WHEN 'Critical' THEN 1 ELSE 2 END, animals.created_at DESC`);
+    res.render('sos', { title: 'Urgent SOS | PawPath', animals });
+  } catch (error) { next(error); }
+});
 app.get('/foster', (req, res) => res.redirect('/animals?category=Urgent%20Foster%20Needed'));
 app.get('/community', (req, res) => res.redirect('/animals?category=Community%20Feeder%20Spot'));
+
+app.get('/profiles', async (req, res, next) => {
+  try {
+    const status = req.query.status || 'Verified';
+    const role = req.query.role || '';
+    const clauses = status ? ['users.verification_status = ?'] : [];
+    const params = status ? [status] : [];
+    if (role) { clauses.push('users.role = ?'); params.push(role); }
+    const profiles = await all(`SELECT users.*, COUNT(animals.id) AS listing_count FROM users LEFT JOIN animals ON animals.user_id=users.id ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} GROUP BY users.id ORDER BY CASE users.verification_status WHEN 'Verified' THEN 1 WHEN 'Under review' THEN 2 ELSE 3 END, listing_count DESC, users.username`, params);
+    res.render('profiles', { title: 'Verified people | PawPath', profiles, filters: { status, role } });
+  } catch (error) { next(error); }
+});
+
+app.get('/profiles/:id', async (req, res, next) => {
+  try {
+    const profile = await get('SELECT id, username, role, bio, locality, profile_photo, verification_status, verified_at, created_at FROM users WHERE id=?', [req.params.id]);
+    if (!profile) return res.status(404).render('error', { title: 'Profile not found | PawPath', message: 'That community profile does not exist.' });
+    const listings = await all("SELECT * FROM animals WHERE user_id=? ORDER BY CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, created_at DESC", [profile.id]);
+    res.render('profile-detail', { title: `${profile.username} | PawPath`, profile, listings });
+  } catch (error) { next(error); }
+});
 
 app.get('/animals', async (req, res, next) => {
   try {
@@ -73,8 +104,9 @@ app.get('/animals', async (req, res, next) => {
     const params = [];
     if (filters.q) { clauses.push('(name LIKE ? OR locality LIKE ? OR description LIKE ?)'); params.push(`%${filters.q}%`, `%${filters.q}%`, `%${filters.q}%`); }
     ['species', 'category', 'urgency', 'status', 'vaccinated'].forEach((key) => { if (filters[key]) { clauses.push(`${key} = ?`); params.push(filters[key]); } });
-    const order = filters.sort === 'urgency' ? "CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, created_at DESC" : 'created_at DESC';
-    const animals = await all(`SELECT * FROM animals ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY ${order}`, params);
+    const ownLast = req.session.user ? `CASE WHEN animals.user_id = ${Number(req.session.user.id)} THEN 1 ELSE 0 END,` : '';
+    const order = filters.sort === 'urgency' ? `${ownLast} CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, animals.created_at DESC` : `${ownLast} animals.created_at DESC`;
+    const animals = await all(`SELECT animals.*, users.username, users.verification_status FROM animals JOIN users ON users.id=animals.user_id ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY ${order}`, params);
     res.render('animals', { title: 'Explore Animals | PawPath', animals, filters });
   } catch (error) { next(error); }
 });
@@ -93,7 +125,7 @@ app.post('/animals', requireLogin, async (req, res, next) => {
 
 app.get('/animals/:id', async (req, res, next) => {
   try {
-    const animal = await get('SELECT animals.*, users.username FROM animals JOIN users ON users.id = animals.user_id WHERE animals.id = ?', [req.params.id]);
+    const animal = await get('SELECT animals.*, users.username, users.verification_status, users.role FROM animals JOIN users ON users.id = animals.user_id WHERE animals.id = ?', [req.params.id]);
     if (!animal) return res.status(404).render('error', { title: 'Not found | PawPath', message: 'That animal profile no longer exists.' });
     const updates = await all('SELECT rescue_updates.*, users.username FROM rescue_updates JOIN users ON users.id = rescue_updates.user_id WHERE animal_id = ? ORDER BY created_at DESC', [animal.id]);
     res.render('animal-detail', { title: `${animal.name} | PawPath`, animal, updates, applicationErrors: [], application: {} });
@@ -166,13 +198,15 @@ app.get('/dashboard', requireLogin, async (req, res, next) => {
     const listings = await all('SELECT * FROM animals WHERE user_id = ? ORDER BY created_at DESC', [req.session.user.id]);
     const received = await all(`SELECT applications.*, animals.name AS animal_name, users.username AS applicant_name FROM applications JOIN animals ON animals.id=applications.animal_id JOIN users ON users.id=applications.user_id WHERE animals.user_id=? ORDER BY applications.created_at DESC`, [req.session.user.id]);
     const sent = await all(`SELECT applications.*, animals.name AS animal_name FROM applications JOIN animals ON animals.id=applications.animal_id WHERE applications.user_id=? ORDER BY applications.created_at DESC`, [req.session.user.id]);
-    res.render('dashboard', { title: 'My Dashboard | PawPath', listings, received, sent });
+    const profile = await get('SELECT * FROM users WHERE id=?', [req.session.user.id]);
+    const verification = await get('SELECT * FROM verification_applications WHERE user_id=?', [req.session.user.id]);
+    res.render('dashboard', { title: 'My Dashboard | PawPath', listings, received, sent, profile, verification });
   } catch (error) { next(error); }
 });
 
 app.get('/signup', (req, res) => res.render('signup', { title: 'Join PawPath', errors: [], values: {} }));
 app.post('/signup', async (req, res, next) => {
-  const { username, email, password, confirm_password, captcha_answer } = req.body;
+  const { username, email, password, confirm_password, captcha_answer, role, locality } = req.body;
   const errors = [];
   if (String(username || '').trim().length < 3) errors.push('Username must have at least 3 characters.');
   if (!/^\S+@\S+\.\S+$/.test(String(email || ''))) errors.push('Enter a valid email address.');
@@ -184,8 +218,8 @@ app.post('/signup', async (req, res, next) => {
     const exists = await get('SELECT id FROM users WHERE email = ? OR username = ?', [email.trim().toLowerCase(), username.trim()]);
     if (exists) return res.status(400).render('signup', { title: 'Join PawPath', errors: ['An account with that email or username already exists.'], values: { username, email } });
     const hash = await bcrypt.hash(password, 10);
-    const result = await run('INSERT INTO users (username,email,password_hash) VALUES (?,?,?)', [username.trim(), email.trim().toLowerCase(), hash]);
-    req.session.user = { id: result.id, username: username.trim(), email: email.trim().toLowerCase() };
+    const result = await run('INSERT INTO users (username,email,password_hash,role,locality) VALUES (?,?,?,?,?)', [username.trim(), email.trim().toLowerCase(), hash, role || 'Community member', String(locality || '').trim()]);
+    req.session.user = { id: result.id, username: username.trim(), email: email.trim().toLowerCase(), verification_status: 'Unverified', is_admin: 0 };
     flash(req, 'success', 'Welcome to PawPath. You can now report or support an animal.'); res.redirect('/dashboard');
   } catch (error) { next(error); }
 });
@@ -198,11 +232,55 @@ app.post('/login', async (req, res, next) => {
     const user = await get('SELECT * FROM users WHERE email = ?', [String(email || '').trim().toLowerCase()]);
     if (!user || !(await bcrypt.compare(password || '', user.password_hash))) errors.push('Email or password is incorrect.');
     if (errors.length) return res.status(400).render('login', { title: 'Log in | PawPath', errors, values: { email } });
-    req.session.user = { id: user.id, username: user.username, email: user.email };
+    req.session.user = { id: user.id, username: user.username, email: user.email, verification_status: user.verification_status, is_admin: Number(user.is_admin) === 1 };
     flash(req, 'success', `Welcome back, ${user.username}.`); res.redirect('/dashboard');
   } catch (error) { next(error); }
 });
 app.post('/logout', (req, res) => req.session.destroy(() => res.redirect('/')));
+
+app.get('/verification/apply', requireLogin, async (req, res, next) => {
+  try {
+    const existing = await get('SELECT * FROM verification_applications WHERE user_id=?', [req.session.user.id]);
+    res.render('verification', { title: 'Apply for verification | PawPath', errors: [], values: existing || {} });
+  } catch (error) { next(error); }
+});
+
+app.post('/verification/apply', requireLogin, async (req, res, next) => {
+  const b = req.body;
+  const required = ['applicant_type','full_name','phone','address','government_id_type','government_id_reference','veterinarian_name','veterinarian_clinic','veterinarian_contact','residence_proof_reference','pet_experience','household_consent','home_visit_consent','welfare_commitment'];
+  const errors = required.filter((field) => !String(b[field] || '').trim()).map((field) => `${field.replaceAll('_', ' ')} is required.`);
+  if (!/^\d{10}$/.test(String(b.phone || '').replace(/\s/g, ''))) errors.push('Enter a valid 10-digit phone number.');
+  if (errors.length) return res.status(400).render('verification', { title: 'Apply for verification | PawPath', errors, values: b });
+  try {
+    const existing = await get('SELECT id FROM verification_applications WHERE user_id=?', [req.session.user.id]);
+    const values = [b.applicant_type,b.full_name.trim(),b.phone.replace(/\s/g,''),b.address.trim(),b.government_id_type,b.government_id_reference.trim(),b.veterinarian_name.trim(),b.veterinarian_clinic.trim(),b.veterinarian_contact.trim(),b.residence_proof_reference.trim(),b.pet_experience.trim(),b.household_consent,b.home_visit_consent,b.welfare_commitment];
+    if (existing) await run(`UPDATE verification_applications SET applicant_type=?,full_name=?,phone=?,address=?,government_id_type=?,government_id_reference=?,veterinarian_name=?,veterinarian_clinic=?,veterinarian_contact=?,residence_proof_reference=?,pet_experience=?,household_consent=?,home_visit_consent=?,welfare_commitment=?,status='Under review',updated_at=CURRENT_TIMESTAMP WHERE user_id=?`, [...values, req.session.user.id]);
+    else await run(`INSERT INTO verification_applications (user_id,applicant_type,full_name,phone,address,government_id_type,government_id_reference,veterinarian_name,veterinarian_clinic,veterinarian_contact,residence_proof_reference,pet_experience,household_consent,home_visit_consent,welfare_commitment) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...values]);
+    await run("UPDATE users SET verification_status='Under review' WHERE id=?", [req.session.user.id]);
+    req.session.user.verification_status = 'Under review';
+    flash(req, 'success', 'Verification application submitted. Review normally takes 3–5 working days.');
+    res.redirect('/dashboard');
+  } catch (error) { next(error); }
+});
+
+app.get('/admin/verifications', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const applications = await all(`SELECT verification_applications.*, users.username, users.email, users.profile_photo FROM verification_applications JOIN users ON users.id=verification_applications.user_id ORDER BY CASE verification_applications.status WHEN 'Under review' THEN 1 ELSE 2 END, verification_applications.created_at DESC`);
+    res.render('admin-verifications', { title: 'Verification review | PawPath', applications });
+  } catch (error) { next(error); }
+});
+
+app.post('/admin/verifications/:id/decision', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const application = await get('SELECT * FROM verification_applications WHERE id=?', [req.params.id]);
+    if (!application) return res.redirect('/admin/verifications');
+    const status = req.body.decision === 'approve' ? 'Approved' : 'Rejected';
+    await run('UPDATE verification_applications SET status=?,reviewer_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [status, String(req.body.reviewer_notes || '').trim(), application.id]);
+    await run('UPDATE users SET verification_status=?,verified_at=? WHERE id=?', [status === 'Approved' ? 'Verified' : 'Unverified', status === 'Approved' ? new Date().toISOString() : null, application.user_id]);
+    flash(req, 'success', `Verification ${status.toLowerCase()}.`);
+    res.redirect('/admin/verifications');
+  } catch (error) { next(error); }
+});
 
 app.use((req, res) => res.status(404).render('error', { title: 'Page not found | PawPath', message: 'This path does not exist. Let’s get you back to helping animals.' }));
 app.use((error, req, res, next) => { console.error(error); res.status(500).render('error', { title: 'Something went wrong | PawPath', message: 'Please try again. If the issue continues, restart the local server.' }); });
