@@ -1,0 +1,17 @@
+{
+  "name": "pawpath",
+  "version": "1.0.0",
+  "description": "A local stray animal rescue, foster and adoption platform.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "ejs": "^3.1.10",
+    "express": "^5.1.0",
+    "express-session": "^1.18.2",
+    "sqlite3": "^5.1.7"
+  }
+}
