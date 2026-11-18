@@ -1,47 +1,29 @@
 <%- include('partials/header') %>
 <section class="profile-hero">
   <img src="<%= profile.profile_photo || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=500&q=80' %>" alt="<%= profile.username %>">
-  <div>
-    <% if (profile.verification_status === 'Verified') { %><span class="verified-badge">✓ PawPath verified</span><% } %>
-    <h1><%= profile.username %></h1>
-    <p class="profile-role"><%= profile.role %> · <%= profile.locality %></p>
-    <p><%= profile.bio %></p>
-    <div class="accountability-box"><strong>What verification means</strong><p>Identity, residence reference, veterinary reference and animal-welfare commitments were submitted for review. It does not replace your own conversation, home check or adoption agreement.</p></div>
-  </div>
+  <div><% if (profile.verification_status === 'Verified') { %><span class="verified-badge">✓ PawPath verified</span><% } %><h1><%= profile.username %></h1><p class="profile-role"><%= profile.role %> · <%= profile.locality %></p><p><%= profile.bio %></p><div class="accountability-box"><strong>What verification means</strong><p>Identity, residence reference, veterinary reference and animal-welfare commitments were submitted for review. It does not replace your own conversation, home check or adoption agreement.</p></div></div>
 </section>
 
 <% if (currentUser && currentUser.id !== profile.id && profile.verification_status === 'Verified') { %>
-<section class="section approach-section">
-  <div class="approach-card">
-    <div><span class="kicker">FIND THE RIGHT HOME OR HELPER</span><h2>Approach <%= profile.username %> about your listing</h2><p>Pick one of your active listings. PawPath shows a starting compatibility score, opens a private chat, and keeps the conversation attached to that animal.</p></div>
-    <% if (ownListings.length) { %>
-      <form method="post" action="/profiles/<%= profile.id %>/approach" class="approach-form">
-        <label>Your active listing
-          <select name="listing_id" id="approach-listing" required>
-            <% ownListings.forEach(listing => { const match = listingMatches.find(item => item.id === listing.id); %>
-              <option value="<%= listing.id %>" data-score="<%= match.score %>"><%= listing.name %> · <%= listing.locality %></option>
-            <% }) %>
-          </select>
-        </label>
-        <div class="match-score"><span>Starting compatibility</span><strong id="match-score"><%= listingMatches[0].score %>%</strong><small>This is a conversation starter, not an adoption approval.</small></div>
-        <button class="button" type="submit">Approach about this listing →</button>
+<section class="section approach-section" id="contact">
+  <div class="approach-card approach-card-chat">
+    <div><span class="kicker">CONTACT <%= profile.username.toUpperCase() %></span><h2>Start a private conversation</h2><p>Ask a veterinarian, rescuer, foster or adopter a general question—or contact them specifically about one of your animals.</p></div>
+    <div class="contact-options">
+      <form method="post" action="/profiles/<%= profile.id %>/chat" class="approach-form">
+        <strong>General question</strong><label>Your opening message<textarea name="message" rows="3" maxlength="1500" placeholder="Hi <%= profile.username %>, I wanted to ask about…"></textarea></label><button class="button" type="submit">Message <%= profile.username %> →</button>
       </form>
-    <% } else { %>
-      <div class="empty-state compact-empty"><p>Post an active animal listing first, then you can approach verified people directly about that animal.</p><a class="button" href="/animals/new">Post an animal</a></div>
-    <% } %>
+      <% if (ownListings.length) { %>
+      <form method="post" action="/profiles/<%= profile.id %>/chat" class="approach-form listing-message-form">
+        <strong>Ask about one of your listings</strong><label>Your active listing<select name="listing_id" id="approach-listing" required><% ownListings.forEach(listing => { const match = listingMatches.find(item => item.id === listing.id); %><option value="<%= listing.id %>" data-score="<%= match.score %>"><%= listing.name %> · <%= listing.locality %></option><% }) %></select></label><div class="match-score"><span>Starting compatibility</span><strong id="match-score"><%= listingMatches[0].score %>%</strong><small>This is a conversation starter, not an adoption approval.</small></div><label>Opening message <small>Optional</small><textarea name="message" rows="2" maxlength="1500" placeholder="Why do you think this could be a fit?"></textarea></label><button class="button" type="submit">Ask about this listing →</button>
+      </form>
+      <% } %>
+    </div>
   </div>
 </section>
 <% } else if (!currentUser) { %>
-<section class="section approach-section"><div class="approach-card"><div><span class="kicker">CONTACT VERIFIED PEOPLE</span><h2>Have a listing that may be a match?</h2><p>Log in to choose your listing, see a compatibility score and start a private chat.</p></div><a class="button" href="/login">Log in to contact</a></div></section>
+<section class="section approach-section"><div class="approach-card"><div><span class="kicker">CONTACT VERIFIED MEMBERS</span><h2>Need advice or support?</h2><p>Log in to start a general chat or ask someone about one of your listings.</p></div><a class="button" href="/login">Log in to contact</a></div></section>
 <% } %>
 
-<section class="section">
-  <div class="section-heading"><div><span class="kicker">LISTINGS BY <%= profile.username.toUpperCase() %></span><h2>Animals they are supporting</h2></div></div>
-  <div class="listing-grid"><% if (listings.length) { listings.forEach(animal => { animal.username=profile.username; animal.verification_status=profile.verification_status; %><%- include('partials/animal-card', { animal }) %><% }) } else { %><div class="empty-state">No active listings right now.</div><% } %></div>
-</section>
-<script>
-  const selector = document.getElementById('approach-listing');
-  const score = document.getElementById('match-score');
-  if (selector && score) selector.addEventListener('change', () => { score.textContent = `${selector.options[selector.selectedIndex].dataset.score}%`; });
-</script>
+<section class="section"><div class="section-heading"><div><span class="kicker">LISTINGS BY <%= profile.username.toUpperCase() %></span><h2>Animals they are supporting</h2></div></div><div class="listing-grid"><% if (listings.length) { listings.forEach(animal => { animal.username=profile.username; animal.verification_status=profile.verification_status; %><%- include('partials/animal-card', { animal }) %><% }) } else { %><div class="empty-state">No active listings right now.</div><% } %></div></section>
+<script>const selector=document.getElementById('approach-listing');const score=document.getElementById('match-score');if(selector&&score)selector.addEventListener('change',()=>{score.textContent=`${selector.options[selector.selectedIndex].dataset.score}%`;});</script>
 <%- include('partials/footer') %>

@@ -49,6 +49,43 @@ async function addColumn(table, definition) {
   }
 }
 
+async function allowGeneralConversations() {
+  if (usingPostgres) {
+    await run('ALTER TABLE conversations ALTER COLUMN listing_id DROP NOT NULL');
+    return;
+  }
+  const columns = await all('PRAGMA table_info(conversations)');
+  const listingColumn = columns.find((column) => column.name === 'listing_id');
+  if (!listingColumn || Number(listingColumn.notnull) !== 1) return;
+
+  // SQLite cannot remove a NOT NULL constraint in place, so rebuild these two
+  // small related tables once while preserving every existing chat and message.
+  await run('PRAGMA foreign_keys = OFF');
+  await run(`CREATE TABLE conversations_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, listing_id INTEGER,
+    initiator_id INTEGER NOT NULL, recipient_id INTEGER NOT NULL,
+    compatibility_score INTEGER NOT NULL DEFAULT 0, topic TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(listing_id, initiator_id, recipient_id),
+    FOREIGN KEY (listing_id) REFERENCES animals(id) ON DELETE CASCADE,
+    FOREIGN KEY (initiator_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  await run('INSERT INTO conversations_new (id,listing_id,initiator_id,recipient_id,compatibility_score,topic,created_at,updated_at) SELECT id,listing_id,initiator_id,recipient_id,compatibility_score,topic,created_at,updated_at FROM conversations');
+  await run(`CREATE TABLE messages_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL,
+    sender_id INTEGER NOT NULL, body TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (conversation_id) REFERENCES conversations_new(id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  await run('INSERT INTO messages_new (id,conversation_id,sender_id,body,created_at) SELECT id,conversation_id,sender_id,body,created_at FROM messages');
+  await run('DROP TABLE messages');
+  await run('DROP TABLE conversations');
+  await run('ALTER TABLE conversations_new RENAME TO conversations');
+  await run('ALTER TABLE messages_new RENAME TO messages');
+  await run('PRAGMA foreign_keys = ON');
+}
+
 async function initialiseDatabase() {
   await run(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE,
@@ -103,10 +140,11 @@ async function initialiseDatabase() {
 
   await run(`CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    listing_id INTEGER NOT NULL,
+    listing_id INTEGER,
     initiator_id INTEGER NOT NULL,
     recipient_id INTEGER NOT NULL,
     compatibility_score INTEGER NOT NULL,
+    topic TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(listing_id, initiator_id, recipient_id),
@@ -124,6 +162,8 @@ async function initialiseDatabase() {
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
+  await addColumn('conversations', 'topic TEXT');
+  await allowGeneralConversations();
 }
 
 module.exports = { run, get, all, initialiseDatabase, usingPostgres };

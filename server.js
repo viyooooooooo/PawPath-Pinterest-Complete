@@ -133,32 +133,44 @@ app.get('/profiles/:id', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.post('/profiles/:id/approach', requireLogin, async (req, res, next) => {
+app.post('/profiles/:id/chat', requireLogin, async (req, res, next) => {
   try {
     const recipient = await get('SELECT id, username, role, verification_status FROM users WHERE id=?', [req.params.id]);
-    const listing = await get("SELECT * FROM animals WHERE id=? AND user_id=? AND status NOT IN ('Adopted','Resolved')", [req.body.listing_id, req.session.user.id]);
-    if (!recipient || recipient.id === req.session.user.id || recipient.verification_status !== 'Verified' || !listing) {
-      flash(req, 'error', 'Choose one of your active listings and a verified PawPath member.');
+    if (!recipient || recipient.id === req.session.user.id || recipient.verification_status !== 'Verified') {
+      flash(req, 'error', 'Choose another verified PawPath member to message.');
       return res.redirect(`/profiles/${req.params.id}`);
     }
-    const score = listingMatchScore(listing, recipient);
-    let conversation = await get('SELECT id FROM conversations WHERE listing_id=? AND initiator_id=? AND recipient_id=?', [listing.id, req.session.user.id, recipient.id]);
-    if (!conversation) {
-      const created = await run('INSERT INTO conversations (listing_id,initiator_id,recipient_id,compatibility_score) VALUES (?,?,?,?)', [listing.id, req.session.user.id, recipient.id, score]);
-      conversation = { id: created.id };
-      await run('INSERT INTO messages (conversation_id,sender_id,body) VALUES (?,?,?)', [conversation.id, req.session.user.id, `Hi ${recipient.username}, I think ${listing.name} could be a good match for your support. Would you be open to discussing this listing?`]);
+    let listing = null;
+    if (req.body.listing_id) {
+      listing = await get("SELECT * FROM animals WHERE id=? AND user_id=? AND status NOT IN ('Adopted','Resolved')", [req.body.listing_id, req.session.user.id]);
+      if (!listing) { flash(req, 'error', 'Please choose one of your active listings.'); return res.redirect(`/profiles/${req.params.id}`); }
     }
-    flash(req, 'success', `Conversation started. Compatibility: ${score}%.`);
+    const score = listing ? listingMatchScore(listing, recipient) : 0;
+    const topic = listing ? `About ${listing.name}` : 'General question';
+    let conversation = listing
+      ? await get('SELECT id FROM conversations WHERE listing_id=? AND initiator_id=? AND recipient_id=?', [listing.id, req.session.user.id, recipient.id])
+      : await get('SELECT id FROM conversations WHERE listing_id IS NULL AND initiator_id=? AND recipient_id=?', [req.session.user.id, recipient.id]);
+    if (!conversation) {
+      const created = await run('INSERT INTO conversations (listing_id,initiator_id,recipient_id,compatibility_score,topic) VALUES (?,?,?,?,?)', [listing ? listing.id : null, req.session.user.id, recipient.id, score, topic]);
+      conversation = { id: created.id };
+      const firstMessage = String(req.body.message || '').trim() || (listing
+        ? `Hi ${recipient.username}, I think ${listing.name} could be a good match for your support. Would you be open to discussing this listing?`
+        : `Hi ${recipient.username}, I would like to ask for your guidance.`);
+      await run('INSERT INTO messages (conversation_id,sender_id,body) VALUES (?,?,?)', [conversation.id, req.session.user.id, firstMessage]);
+    }
+    flash(req, 'success', listing ? `Conversation started. Compatibility: ${score}%.` : 'Conversation started.');
     res.redirect(`/messages/${conversation.id}`);
   } catch (error) { next(error); }
 });
 
+app.post('/profiles/:id/approach', requireLogin, (req, res) => res.redirect(307, `/profiles/${req.params.id}/chat`));
+
 app.get('/messages', requireLogin, async (req, res, next) => {
   try {
-    const conversations = await all(`SELECT conversations.*, animals.name AS listing_name,
+    const conversations = await all(`SELECT conversations.*, COALESCE(conversations.topic, animals.name, 'General question') AS topic,
       CASE WHEN conversations.initiator_id=? THEN recipients.username ELSE initiators.username END AS other_username
       FROM conversations
-      JOIN animals ON animals.id=conversations.listing_id
+      LEFT JOIN animals ON animals.id=conversations.listing_id
       JOIN users AS initiators ON initiators.id=conversations.initiator_id
       JOIN users AS recipients ON recipients.id=conversations.recipient_id
       WHERE conversations.initiator_id=? OR conversations.recipient_id=?
@@ -169,9 +181,9 @@ app.get('/messages', requireLogin, async (req, res, next) => {
 
 app.get('/messages/:id', requireLogin, async (req, res, next) => {
   try {
-    const conversation = await get(`SELECT conversations.*, animals.name AS listing_name,
+    const conversation = await get(`SELECT conversations.*, COALESCE(conversations.topic, animals.name, 'General question') AS topic,
       initiators.username AS initiator_name, recipients.username AS recipient_name
-      FROM conversations JOIN animals ON animals.id=conversations.listing_id
+      FROM conversations LEFT JOIN animals ON animals.id=conversations.listing_id
       JOIN users AS initiators ON initiators.id=conversations.initiator_id
       JOIN users AS recipients ON recipients.id=conversations.recipient_id
       WHERE conversations.id=?`, [req.params.id]);
