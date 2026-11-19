@@ -1,4 +1,4 @@
-<article class="animal-card <%= ['Critical','Needs Help Today'].includes(animal.urgency) ? 'animal-critical' : '' %>">
+<article class="animal-card <%= ['Critical','Needs Help Today'].includes(animal.urgency) ? 'animal-critical' : '' %> <%= ['Adopted','Resolved'].includes(animal.status) ? 'listing-completed' : '' %>">
   <a class="animal-photo" href="/animals/<%= animal.id %>">
     <% if (animal.photo_url) { %><img src="<%= animal.photo_url %>" alt="<%= animal.name %>" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"> <% } %>
     <span class="animal-photo-placeholder" style="display:<%= animal.photo_url ? 'none' : 'grid' %>">Photo not added<small>Help identify this animal</small></span>

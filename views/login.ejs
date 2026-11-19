@@ -6,7 +6,7 @@
     <% if (errors.length) { %><div class="form-errors"><ul><% errors.forEach(error => { %><li><%= error %></li><% }) %></ul></div><% } %>
     <label>Email<input name="email" type="email" required value="<%= values.email || '' %>"></label>
     <label>Password<input name="password" type="password" required minlength="8"></label>
-    <label class="captcha-label">Quick check: what is <strong><%= captcha.question %></strong>?<input name="captcha_answer" inputmode="numeric" required></label>
+    <label class="captcha-label">Quick check: what is <strong><%= captcha.question %></strong>?<input name="captcha_answer" inputmode="numeric" required><input type="hidden" name="captcha_token" value="<%= captchaToken %>"></label>
     <button class="button">Log in</button><p>New here? <a href="/signup">Create an account</a></p>
   </form>
 </section>

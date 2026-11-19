@@ -210,10 +210,12 @@ async function initialiseDatabase() {
 
   await run(`CREATE TABLE IF NOT EXISTS rescue_updates (
     id INTEGER PRIMARY KEY AUTOINCREMENT, animal_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
-    update_text TEXT NOT NULL, update_type TEXT NOT NULL DEFAULT 'Progress update', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    update_text TEXT NOT NULL, update_type TEXT NOT NULL DEFAULT 'Progress update', photo_url TEXT, is_automatic INTEGER NOT NULL DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (animal_id) REFERENCES animals(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
+  await addColumn('rescue_updates', 'photo_url TEXT');
+  await addColumn('rescue_updates', 'is_automatic INTEGER NOT NULL DEFAULT 0');
 
   await run(`CREATE TABLE IF NOT EXISTS verification_applications (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL UNIQUE, applicant_type TEXT NOT NULL,
@@ -223,10 +225,13 @@ async function initialiseDatabase() {
     household_consent TEXT NOT NULL, home_visit_consent TEXT NOT NULL, welfare_commitment TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'Under review', reviewer_notes TEXT,
     proof_document TEXT,
+    selected_vet_user_id INTEGER, reviewed_by_user_id INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
   await addColumn('verification_applications', 'proof_document TEXT');
+  await addColumn('verification_applications', 'selected_vet_user_id INTEGER');
+  await addColumn('verification_applications', 'reviewed_by_user_id INTEGER');
 
   await run(`CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

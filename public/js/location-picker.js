@@ -14,9 +14,9 @@
       input.value = place.label;
       latitude.value = place.latitude;
       longitude.value = place.longitude;
-      accuracy.value = 'exact';
+      accuracy.value = place.accuracy || 'exact';
       results.hidden = true;
-      status.textContent = '✓ Exact map pin saved';
+      status.textContent = place.accuracy === 'approximate' ? '✓ Approximate pin saved — Detect my location for an exact pin' : '✓ Exact map pin saved';
       picker.classList.add('location-confirmed');
     };
     const findPlaces = async () => {
@@ -31,7 +31,7 @@
         results.hidden = false;
         results.querySelectorAll('[data-place]').forEach((button) => button.addEventListener('click', () => selectLocation(places[Number(button.dataset.place)])));
         status.textContent = places.length ? 'Select the exact matching location.' : 'Try a more specific place name.';
-      } catch (error) { status.textContent = 'Location search is temporarily unavailable. You can still type an address.'; }
+      } catch (error) { status.textContent = 'Search could not connect. Type an address anyway—it will still be saved with a map pin.'; }
     };
     input.addEventListener('input', () => {
       latitude.value = ''; longitude.value = ''; accuracy.value = ''; picker.classList.remove('location-confirmed');
@@ -46,7 +46,10 @@
           const place = await response.json();
           if (!response.ok) throw new Error(place.error);
           selectLocation(place);
-        } catch (error) { status.textContent = 'We found your pin but could not retrieve its address. Search a nearby landmark instead.'; }
+        } catch (error) {
+          selectLocation({ label: `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`, latitude: coords.latitude, longitude: coords.longitude, accuracy: 'exact' });
+          status.textContent = '✓ Exact pin saved (address lookup was unavailable)';
+        }
         finally { detect.disabled = false; detect.textContent = '◎ Detect my location'; }
       }, () => { status.textContent = 'Location access was not available. Search an address instead.'; detect.disabled = false; detect.textContent = '◎ Detect my location'; }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
     });

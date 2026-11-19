@@ -18,7 +18,7 @@
     </fieldset>
     <label>Verification document <span class="optional-label">Optional now</span><input name="verification_document" type="file" accept="image/*,application/pdf"><small>For vets: registration/clinic proof. For rescuers or organisations: suitable identity or organisation evidence. It is private and requires human review.</small></label>
     <label>Password<input name="password" type="password" required minlength="8"><small>Use at least 8 characters.</small></label><label>Confirm password<input name="confirm_password" type="password" required minlength="8"></label>
-    <label class="captcha-label">Quick check: what is <strong><%= captcha.question %></strong>?<input name="captcha_answer" inputmode="numeric" required></label>
+    <label class="captcha-label">Quick check: what is <strong><%= captcha.question %></strong>?<input name="captcha_answer" inputmode="numeric" required><input type="hidden" name="captcha_token" value="<%= captchaToken %>"></label>
     <button class="button">Create account</button><p class="form-note">After signup, your dashboard shows the optional verification application.</p><p>Already a member? <a href="/login">Log in</a></p>
   </form>
 </section>

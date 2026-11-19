@@ -2,6 +2,7 @@ const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
+const crypto = require('crypto');
 const { run, get, all, initialiseDatabase } = require('./database');
 const { coordinatesForPlace } = require('./geo-utils');
 
@@ -39,6 +40,7 @@ const networkGroups = {
 const NETWORK_PAGE_SIZE = 24;
 const locationCache = new Map();
 let lastGeocoderRequestAt = 0;
+const liveClients = new Map();
 const networkDirectoryCte = `WITH network AS (
   SELECT
     'user' AS source_type,
@@ -141,10 +143,29 @@ function freshCaptcha(req) {
   const second = Math.floor(Math.random() * 8) + 1;
   req.session.captcha = { question: `${first} + ${second}`, answer: String(first + second) };
 }
-function captchaOk(req, answer) {
-  const correct = req.session.captcha && String(answer || '').trim() === req.session.captcha.answer;
+function captchaToken(captcha) {
+  const payload = `${captcha.question}|${captcha.answer}|${Date.now()}`;
+  const signature = crypto.createHmac('sha256', process.env.SESSION_SECRET || 'pawpath-local-demo-secret').update(payload).digest('hex');
+  return Buffer.from(`${payload}|${signature}`).toString('base64url');
+}
+function captchaOk(req, answer, token) {
+  let signedCorrect = false;
+  try {
+    const decoded = Buffer.from(String(token || ''), 'base64url').toString();
+    const parts = decoded.split('|');
+    const [question, expected, createdAt, signature] = parts;
+    const payload = `${question}|${expected}|${createdAt}`;
+    const actual = crypto.createHmac('sha256', process.env.SESSION_SECRET || 'pawpath-local-demo-secret').update(payload).digest('hex');
+    signedCorrect = parts.length === 4 && crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(signature || '')) && Date.now() - Number(createdAt) < 1000 * 60 * 60 * 2 && String(answer || '').trim() === expected;
+  } catch (error) { signedCorrect = false; }
+  const correct = signedCorrect || Boolean(req.session.captcha && String(answer || '').trim() === req.session.captcha.answer);
   freshCaptcha(req);
   return correct;
+}
+function pushLive(userId, event, payload) {
+  const clients = liveClients.get(Number(userId));
+  if (!clients) return;
+  for (const response of clients) response.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 function flash(req, type, text) { req.session.flash = { type, text }; }
 function requireLogin(req, res, next) {
@@ -159,7 +180,6 @@ function validateAnimal(body) {
   const errors = [];
   const required = ['name', 'locality'];
   required.forEach((field) => { if (!String(body[field] || '').trim()) errors.push(`${field.replace('_', ' ')} is required.`); });
-  if (String(body.locality || '').trim() && (String(body.latitude ?? '').trim() === '' || String(body.longitude ?? '').trim() === '')) errors.push('Choose a suggested location or use Detect my location so this listing can appear accurately on the map.');
   return errors;
 }
 
@@ -210,6 +230,7 @@ app.use(async (req, res, next) => {
   res.locals.currentUser = req.session.user || null;
   res.locals.flash = req.session.flash || null;
   res.locals.captcha = req.session.captcha;
+  res.locals.captchaToken = captchaToken(req.session.captcha);
   res.locals.currentPath = req.path;
   res.locals.unreadNotifications = 0;
   res.locals.unreadMessages = 0;
@@ -259,6 +280,28 @@ app.get('/community', (req, res) => res.redirect('/animals?category=Community%20
 
 app.get('/map', (req, res) => res.render('map', { title: 'Live map | PawPath', mapAssets: true }));
 
+app.get('/api/live', requireLogin, (req, res) => {
+  const userId = Number(req.session.user.id);
+  res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.flushHeaders();
+  res.write(`event: connected\ndata: {"ok":true}\n\n`);
+  if (!liveClients.has(userId)) liveClients.set(userId, new Set());
+  liveClients.get(userId).add(res);
+  const heartbeat = setInterval(() => res.write(': keep-alive\n\n'), 25000);
+  req.on('close', () => { clearInterval(heartbeat); liveClients.get(userId)?.delete(res); if (!liveClients.get(userId)?.size) liveClients.delete(userId); });
+});
+
+app.get('/api/messages/:id/since', requireLogin, async (req, res, next) => {
+  try {
+    const conversation = await get('SELECT * FROM conversations WHERE id=?', [req.params.id]);
+    if (!conversation || ![conversation.initiator_id, conversation.recipient_id].includes(req.session.user.id)) return res.status(403).json({ error: 'Not available' });
+    const rows = await all(`SELECT messages.*,users.username FROM messages JOIN users ON users.id=messages.sender_id WHERE conversation_id=? AND messages.id>? ORDER BY messages.id`, [conversation.id, Number(req.query.after || 0)]);
+    const readColumn = conversation.initiator_id === req.session.user.id ? 'initiator_read_at' : 'recipient_read_at';
+    if (rows.length) await run(`UPDATE conversations SET ${readColumn}=CURRENT_TIMESTAMP WHERE id=?`, [conversation.id]);
+    res.json(rows);
+  } catch (error) { next(error); }
+});
+
 async function nominatimRequest(url) {
   const cached = locationCache.get(url);
   if (cached && Date.now() - cached.savedAt < 1000 * 60 * 60 * 24) return cached.value;
@@ -279,7 +322,10 @@ app.get('/api/location-search', async (req, res, next) => {
     const results = await nominatimRequest(url);
     res.set('Cache-Control', 'public, max-age=86400');
     res.json(results.map((item) => ({ label: item.display_name, latitude: Number(item.lat), longitude: Number(item.lon) })));
-  } catch (error) { res.status(503).json({ error: error.message }); }
+  } catch (error) {
+    const fallback = coordinatesForPlace(q, '', `search:${q}`);
+    res.json([{ label: `${q} (approximate pin — use Detect my location for an exact pin)`, latitude: fallback.latitude, longitude: fallback.longitude, accuracy: 'approximate' }]);
+  }
 });
 app.get('/api/location-reverse', async (req, res, next) => {
   const latitude = Number(req.query.lat ?? req.query.latitude); const longitude = Number(req.query.lon ?? req.query.longitude);
@@ -289,7 +335,7 @@ app.get('/api/location-reverse', async (req, res, next) => {
     const result = await nominatimRequest(url);
     if (result.address?.country_code && result.address.country_code !== 'in') return res.status(400).json({ error: 'Please choose a location in India.' });
     res.json({ label: result.display_name || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`, latitude, longitude });
-  } catch (error) { res.status(503).json({ error: error.message }); }
+  } catch (error) { res.json({ label: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`, latitude, longitude, addressUnavailable: true }); }
 });
 
 app.get('/api/map-data', async (req, res, next) => {
@@ -439,6 +485,7 @@ app.post('/profiles/:id/chat', requireLogin, async (req, res, next) => {
       const message = await run('INSERT INTO messages (conversation_id,sender_id,body) VALUES (?,?,?)', [conversation.id, req.session.user.id, firstMessage]);
       await run('UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?', [conversation.id]);
       await createNotification(recipient.id, `message-${message.id}`, 'message', `New message from ${req.session.user.username}`, firstMessage.slice(0, 120), `/messages/${conversation.id}`);
+      pushLive(recipient.id, 'message', { conversationId: conversation.id, messageId: message.id, sender: req.session.user.username, body: firstMessage });
     }
     flash(req, 'success', listing ? `Conversation started. Compatibility: ${score}%.` : 'Conversation started.');
     res.redirect(`/messages/${conversation.id}`);
@@ -501,6 +548,8 @@ app.post('/messages/:id', requireLogin, async (req, res, next) => {
     await run('UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?', [conversation.id]);
     const recipientId = conversation.initiator_id === req.session.user.id ? conversation.recipient_id : conversation.initiator_id;
     await createNotification(recipientId, `message-${message.id}`, 'message', `New message from ${req.session.user.username}`, body.slice(0, 120), `/messages/${conversation.id}`);
+    pushLive(recipientId, 'message', { conversationId: conversation.id, messageId: message.id, sender: req.session.user.username, body });
+    if (req.get('accept')?.includes('application/json')) return res.json({ id: message.id, conversationId: conversation.id, sender_id: req.session.user.id, username: req.session.user.username, body, created_at: new Date().toISOString() });
     res.redirect(`/messages/${conversation.id}`);
   } catch (error) { next(error); }
 });
@@ -513,7 +562,8 @@ app.get('/animals', async (req, res, next) => {
     if (filters.q) { clauses.push('(name LIKE ? OR locality LIKE ? OR description LIKE ?)'); params.push(`%${filters.q}%`, `%${filters.q}%`, `%${filters.q}%`); }
     ['species', 'category', 'urgency', 'status', 'vaccinated'].forEach((key) => { if (filters[key]) { clauses.push(`${key} = ?`); params.push(filters[key]); } });
     const ownLast = req.session.user ? `CASE WHEN animals.user_id = ${Number(req.session.user.id)} THEN 1 ELSE 0 END,` : '';
-    const order = filters.sort === 'urgency' ? `${ownLast} CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, animals.created_at DESC` : `${ownLast} animals.created_at DESC`;
+    const acceptedLast = `CASE WHEN animals.status IN ('Adopted','Resolved') THEN 1 ELSE 0 END,`;
+    const order = filters.sort === 'urgency' ? `${acceptedLast} ${ownLast} CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, animals.created_at DESC` : `${acceptedLast} ${ownLast} animals.created_at DESC`;
     const animals = await all(`SELECT animals.*, users.username, users.verification_status FROM animals JOIN users ON users.id=animals.user_id ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY ${order}`, params);
     res.render('animals', { title: 'Explore Animals | PawPath', animals, filters });
   } catch (error) { next(error); }
@@ -540,7 +590,9 @@ app.get('/animals/:id', async (req, res, next) => {
     const animal = await get('SELECT animals.*, users.username, users.verification_status, users.role FROM animals JOIN users ON users.id = animals.user_id WHERE animals.id = ?', [req.params.id]);
     if (!animal) return res.status(404).render('error', { title: 'Not found | PawPath', message: 'That animal profile no longer exists.' });
     const updates = await all('SELECT rescue_updates.*, users.username FROM rescue_updates JOIN users ON users.id = rescue_updates.user_id WHERE animal_id = ? ORDER BY created_at DESC', [animal.id]);
-    res.render('animal-detail', { title: `${animal.name} | PawPath`, animal, updates, applicationErrors: [], application: {} });
+    const acceptedOffer = await get("SELECT * FROM applications WHERE animal_id=? AND status='Accepted' ORDER BY updated_at DESC LIMIT 1", [animal.id]);
+    const canPostUpdate = Boolean(req.session.user && (req.session.user.id === animal.user_id || acceptedOffer?.user_id === req.session.user.id));
+    res.render('animal-detail', { title: `${animal.name} | PawPath`, animal, updates, applicationErrors: [], application: {}, acceptedOffer, canPostUpdate });
   } catch (error) { next(error); }
 });
 
@@ -576,6 +628,7 @@ app.post('/animals/:id/apply', requireLogin, proofUpload.single('support_documen
   try {
     const animal = await get('SELECT animals.*, users.username, users.verification_status FROM animals JOIN users ON users.id=animals.user_id WHERE animals.id = ?', [req.params.id]);
     if (!animal) return res.redirect('/animals');
+    if (['Adopted', 'Resolved'].includes(animal.status)) { flash(req, 'error', 'This listing is complete because an offer has already been accepted.'); return res.redirect(`/animals/${animal.id}`); }
     const b = req.body;
     const errors = [];
     ['request_type', 'housing_type', 'locality', 'pet_experience', 'working_hours', 'contact_number', 'message'].forEach((field) => { if (!String(b[field] || '').trim()) errors.push(`${field.replace('_', ' ')} is required.`); });
@@ -585,7 +638,9 @@ app.post('/animals/:id/apply', requireLogin, proofUpload.single('support_documen
     if (errors.length) return res.status(400).render('animal-detail', { title: `${animal.name} | PawPath`, animal, updates, applicationErrors: errors, application: b });
     const document = proofFromRequest(req);
     const result = await run(`INSERT INTO applications (animal_id,user_id,request_type,housing_type,locality,pet_experience,working_hours,contact_number,message,compatibility_score,share_contact,share_profile,share_verification,support_document,support_document_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [animal.id, req.session.user.id, b.request_type, b.housing_type, b.locality.trim(), b.pet_experience, b.working_hours, b.contact_number.replace(/\s/g, ''), b.message.trim(), compatibility(b), b.share_contact === 'on' ? 1 : 0, b.share_profile === 'on' ? 1 : 0, b.share_verification === 'on' ? 1 : 0, document, req.file?.originalname || '']);
+    await run('INSERT INTO rescue_updates (animal_id,user_id,update_text,update_type,is_automatic) VALUES (?,?,?,?,1)', [animal.id, req.session.user.id, `${req.session.user.username} sent a ${b.request_type.toLowerCase()} offer.`, 'Offer received']);
     await createNotification(animal.user_id, `offer-${result.id}`, 'offer', `New ${b.request_type} offer for ${animal.name}`, `${req.session.user.username} sent a help offer. Review their message, contact details and shared documents.`, `/offers/${result.id}`);
+    pushLive(animal.user_id, 'offer', { offerId: result.id, animalId: animal.id, title: `New ${b.request_type} offer for ${animal.name}`, body: `${req.session.user.username} sent a help offer.` });
     flash(req, 'success', 'Your help offer has been sent. You can track it from My Dashboard.'); res.redirect(`/offers/${result.id}`);
   } catch (error) { next(error); }
 });
@@ -619,9 +674,23 @@ app.post('/offers/:id/status', requireLogin, async (req, res, next) => {
     const statuses = { accept: 'Accepted', decline: 'Declined', request: 'More information needed' };
     const status = statuses[req.body.decision];
     if (!status) return res.redirect(`/offers/${offer.id}`);
+    if (offer.status === 'Accepted') { flash(req, 'error', 'This offer is already accepted. The next step is to contact the adopter or request an update.'); return res.redirect(`/offers/${offer.id}`); }
+    const applicant = await get('SELECT username,verification_status FROM users WHERE id=?', [offer.user_id]);
+    if (status === 'Accepted' && applicant?.verification_status !== 'Verified' && String(req.body.unverified_confirmation || '').trim().toUpperCase() !== 'ACCEPT') {
+      flash(req, 'error', 'This person is not verified or supported by a vet. Type ACCEPT in the warning box to confirm you still want to proceed.');
+      return res.redirect(`/offers/${offer.id}`);
+    }
     const ownerNote = String(req.body.owner_note || '').trim();
     await run('UPDATE applications SET status=?,owner_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [status, ownerNote, offer.id]);
+    if (status === 'Accepted') {
+      await run("UPDATE animals SET status='Adopted' WHERE id=?", [offer.animal_id]);
+      await run("UPDATE applications SET status='Declined',owner_note='Another offer was accepted.',updated_at=CURRENT_TIMESTAMP WHERE animal_id=? AND id<>? AND status IN ('Pending','More information needed')", [offer.animal_id, offer.id]);
+      await run('INSERT INTO rescue_updates (animal_id,user_id,update_text,update_type,is_automatic) VALUES (?,?,?,?,1)', [offer.animal_id, req.session.user.id, `${applicant.username}'s offer was accepted. This listing has moved to the completed section.`, 'Offer accepted']);
+    } else {
+      await run('INSERT INTO rescue_updates (animal_id,user_id,update_text,update_type,is_automatic) VALUES (?,?,?,?,1)', [offer.animal_id, req.session.user.id, `Offer status changed to ${status.toLowerCase()}.`, 'Offer update']);
+    }
     await createNotification(offer.user_id, `offer-status-${offer.id}-${Date.now()}`, 'offer_update', `${offer.animal_name}: offer ${status.toLowerCase()}`, ownerNote || `The listing owner marked your offer as ${status.toLowerCase()}.`, `/offers/${offer.id}`);
+    pushLive(offer.user_id, 'offer_update', { offerId: offer.id, animalId: offer.animal_id, status, title: `${offer.animal_name}: offer ${status.toLowerCase()}` });
     flash(req, 'success', `Offer marked ${status.toLowerCase()}.`); res.redirect(`/offers/${offer.id}`);
   } catch (error) { next(error); }
 });
@@ -640,6 +709,7 @@ app.post('/offers/:id/chat', requireLogin, async (req, res, next) => {
     const message = await run('INSERT INTO messages (conversation_id,sender_id,body) VALUES (?,?,?)', [conversation.id, req.session.user.id, body]);
     await run('UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?', [conversation.id]);
     await createNotification(otherId, `message-${message.id}`, 'message', `New message from ${req.session.user.username}`, body.slice(0, 120), `/messages/${conversation.id}`);
+    pushLive(otherId, 'message', { conversationId: conversation.id, messageId: message.id, sender: req.session.user.username, body });
     res.redirect(`/messages/${conversation.id}`);
   } catch (error) { next(error); }
 });
@@ -665,12 +735,15 @@ app.post('/notifications/:id/dismiss', requireLogin, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.post('/animals/:id/updates', requireLogin, async (req, res, next) => {
+app.post('/animals/:id/updates', requireLogin, upload.single('update_photo'), async (req, res, next) => {
   try {
     const animal = await get('SELECT * FROM animals WHERE id = ?', [req.params.id]);
-    if (!animal || animal.user_id !== req.session.user.id) { flash(req, 'error', 'Only the listing creator can add updates.'); return res.redirect(`/animals/${req.params.id}`); }
-    if (String(req.body.update_text || '').trim().length < 8) { flash(req, 'error', 'Please write a fuller rescue update.'); return res.redirect(`/animals/${animal.id}`); }
-    await run('INSERT INTO rescue_updates (animal_id,user_id,update_text,update_type) VALUES (?,?,?,?)', [animal.id, req.session.user.id, req.body.update_text.trim(), req.body.update_type || 'Progress update']);
+    const accepted = animal ? await get("SELECT user_id FROM applications WHERE animal_id=? AND status='Accepted' ORDER BY updated_at DESC LIMIT 1", [animal.id]) : null;
+    if (!animal || (animal.user_id !== req.session.user.id && accepted?.user_id !== req.session.user.id)) { flash(req, 'error', 'Updates can be posted by the listing creator and the person whose offer was accepted.'); return res.redirect(`/animals/${req.params.id}`); }
+    const text = String(req.body.update_text || '').trim();
+    if (text.length < 8 && !req.file) { flash(req, 'error', 'Add a short note or a photo to post an update.'); return res.redirect(`/animals/${animal.id}`); }
+    const photo = req.file ? `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}` : '';
+    await run('INSERT INTO rescue_updates (animal_id,user_id,update_text,update_type,photo_url) VALUES (?,?,?,?,?)', [animal.id, req.session.user.id, text || 'Photo update', req.body.update_type || 'Progress update', photo]);
     flash(req, 'success', 'Rescue update posted.'); res.redirect(`/animals/${animal.id}`);
   } catch (error) { next(error); }
 });
@@ -685,12 +758,12 @@ app.post('/updates/:id/delete', requireLogin, async (req, res, next) => {
 
 app.get('/dashboard', requireLogin, async (req, res, next) => {
   try {
-    const listings = await all('SELECT * FROM animals WHERE user_id = ? ORDER BY created_at DESC', [req.session.user.id]);
+    const listings = await all("SELECT * FROM animals WHERE user_id = ? ORDER BY CASE WHEN status IN ('Adopted','Resolved') THEN 1 ELSE 0 END, created_at DESC", [req.session.user.id]);
     const received = await all(`SELECT applications.*, animals.name AS animal_name, animals.photo_url AS animal_photo, users.username AS applicant_name, users.verification_status AS applicant_verification FROM applications JOIN animals ON animals.id=applications.animal_id JOIN users ON users.id=applications.user_id WHERE animals.user_id=? ORDER BY applications.created_at DESC`, [req.session.user.id]);
     const sent = await all(`SELECT applications.*, animals.name AS animal_name, animals.photo_url AS animal_photo, owners.username AS owner_name FROM applications JOIN animals ON animals.id=applications.animal_id JOIN users AS owners ON owners.id=animals.user_id WHERE applications.user_id=? ORDER BY applications.created_at DESC`, [req.session.user.id]);
     for (const offer of received) await createNotification(req.session.user.id, `offer-${offer.id}`, 'offer', `Offer for ${offer.animal_name}`, `${offer.applicant_name} offered ${offer.request_type.toLowerCase()}.`, `/offers/${offer.id}`);
     const profile = await get('SELECT * FROM users WHERE id=?', [req.session.user.id]);
-    const verification = await get('SELECT * FROM verification_applications WHERE user_id=?', [req.session.user.id]);
+    const verification = await get(`SELECT verification_applications.*,reviewing_vet.username AS reviewing_vet_name,reviewing_vet.organisation_name AS reviewing_vet_clinic FROM verification_applications LEFT JOIN users AS reviewing_vet ON reviewing_vet.id=verification_applications.selected_vet_user_id WHERE verification_applications.user_id=?`, [req.session.user.id]);
     res.render('dashboard', { title: 'My Dashboard | PawPath', listings, received, sent, profile, verification });
   } catch (error) { next(error); }
 });
@@ -705,11 +778,10 @@ app.post('/signup', proofUpload.single('verification_document'), async (req, res
   if (password !== confirm_password) errors.push('Passwords do not match.');
   if (!Object.values(networkGroups).flatMap((group) => group.values).includes(entity_type)) errors.push('Please choose how you will participate in the PawPath network.');
   if (!String(locality || '').trim()) errors.push('Choose your location so your profile can appear on the PawPath map.');
-  if (String(locality || '').trim() && (String(req.body.latitude ?? '').trim() === '' || String(req.body.longitude ?? '').trim() === '')) errors.push('Select a suggested location or use Detect my location.');
   if (phone && !/^\d{10}$/.test(String(phone).replace(/\s/g, ''))) errors.push('Enter a valid 10-digit phone number, or leave it blank.');
   if (public_email && !/^\S+@\S+\.\S+$/.test(String(public_email))) errors.push('Enter a valid public email address, or leave it blank.');
   if (website && !safeWebsite(website)) errors.push('Enter a valid website address, or leave it blank.');
-  if (!captchaOk(req, captcha_answer)) errors.push('CAPTCHA answer was incorrect. Please try the new question.');
+  if (!captchaOk(req, captcha_answer, req.body.captcha_token)) errors.push('CAPTCHA answer was incorrect. Please try the new question.');
   if (errors.length) return res.status(400).render('signup', { title: 'Join PawPath', errors, values: req.body });
   try {
     const exists = await get('SELECT id FROM users WHERE email = ? OR username = ?', [email.trim().toLowerCase(), username.trim()]);
@@ -732,7 +804,7 @@ app.get('/login', (req, res) => res.render('login', { title: 'Log in | PawPath',
 app.post('/login', async (req, res, next) => {
   const { email, password, captcha_answer } = req.body;
   const errors = [];
-  if (!captchaOk(req, captcha_answer)) errors.push('CAPTCHA answer was incorrect. Please try the new question.');
+  if (!captchaOk(req, captcha_answer, req.body.captcha_token)) errors.push('CAPTCHA answer was incorrect. Please try the new question.');
   try {
     const user = await get('SELECT * FROM users WHERE email = ?', [String(email || '').trim().toLowerCase()]);
     if (!user || !(await bcrypt.compare(password || '', user.password_hash))) errors.push('Email or password is incorrect.');
@@ -746,26 +818,55 @@ app.post('/logout', (req, res) => req.session.destroy(() => res.redirect('/')));
 app.get('/verification/apply', requireLogin, async (req, res, next) => {
   try {
     const existing = await get('SELECT * FROM verification_applications WHERE user_id=?', [req.session.user.id]);
-    res.render('verification', { title: 'Apply for verification | PawPath', errors: [], values: existing || {} });
+    const vets = await all("SELECT id,username,organisation_name,locality,verification_status FROM users WHERE entity_type='Veterinarian / vet clinic' AND id<>? ORDER BY CASE verification_status WHEN 'Verified' THEN 1 ELSE 2 END,username", [req.session.user.id]);
+    res.render('verification', { title: 'Apply for verification | PawPath', errors: [], values: existing || {}, vets });
   } catch (error) { next(error); }
 });
 
 app.post('/verification/apply', requireLogin, proofUpload.single('proof_document'), async (req, res, next) => {
   const b = req.body;
-  const required = ['applicant_type','full_name','phone','address','government_id_type','government_id_reference','veterinarian_name','veterinarian_clinic','veterinarian_contact','residence_proof_reference','pet_experience','household_consent','home_visit_consent','welfare_commitment'];
+  const required = ['applicant_type','full_name','phone','address','government_id_type','government_id_reference','selected_vet_user_id','residence_proof_reference','pet_experience','household_consent','home_visit_consent','welfare_commitment'];
   const errors = required.filter((field) => !String(b[field] || '').trim()).map((field) => `${field.replaceAll('_', ' ')} is required.`);
   if (!/^\d{10}$/.test(String(b.phone || '').replace(/\s/g, ''))) errors.push('Enter a valid 10-digit phone number.');
-  if (errors.length) return res.status(400).render('verification', { title: 'Apply for verification | PawPath', errors, values: b });
   try {
+    const vets = await all("SELECT id,username,organisation_name,locality,verification_status,phone FROM users WHERE entity_type='Veterinarian / vet clinic' AND id<>? ORDER BY username", [req.session.user.id]);
+    const selectedVet = vets.find((vet) => Number(vet.id) === Number(b.selected_vet_user_id));
+    if (!selectedVet) errors.push('Choose a registered PawPath veterinarian or clinic to review your application.');
+    if (errors.length) return res.status(400).render('verification', { title: 'Apply for verification | PawPath', errors, values: b, vets });
     const existing = await get('SELECT id, proof_document FROM verification_applications WHERE user_id=?', [req.session.user.id]);
-    const values = [b.applicant_type,b.full_name.trim(),b.phone.replace(/\s/g,''),b.address.trim(),b.government_id_type,b.government_id_reference.trim(),b.veterinarian_name.trim(),b.veterinarian_clinic.trim(),b.veterinarian_contact.trim(),b.residence_proof_reference.trim(),b.pet_experience.trim(),b.household_consent,b.home_visit_consent,b.welfare_commitment];
+    const values = [b.applicant_type,b.full_name.trim(),b.phone.replace(/\s/g,''),b.address.trim(),b.government_id_type,b.government_id_reference.trim(),selectedVet.username,String(selectedVet.organisation_name || selectedVet.username),String(selectedVet.phone || 'Contact through PawPath'),b.residence_proof_reference.trim(),b.pet_experience.trim(),b.household_consent,b.home_visit_consent,b.welfare_commitment];
     const document = proofFromRequest(req, existing?.proof_document || '');
-    if (existing) await run(`UPDATE verification_applications SET applicant_type=?,full_name=?,phone=?,address=?,government_id_type=?,government_id_reference=?,veterinarian_name=?,veterinarian_clinic=?,veterinarian_contact=?,residence_proof_reference=?,pet_experience=?,household_consent=?,home_visit_consent=?,welfare_commitment=?,proof_document=?,status='Under review',updated_at=CURRENT_TIMESTAMP WHERE user_id=?`, [...values, document, req.session.user.id]);
-    else await run(`INSERT INTO verification_applications (user_id,applicant_type,full_name,phone,address,government_id_type,government_id_reference,veterinarian_name,veterinarian_clinic,veterinarian_contact,residence_proof_reference,pet_experience,household_consent,home_visit_consent,welfare_commitment,proof_document) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...values, document]);
+    if (existing) await run(`UPDATE verification_applications SET applicant_type=?,full_name=?,phone=?,address=?,government_id_type=?,government_id_reference=?,veterinarian_name=?,veterinarian_clinic=?,veterinarian_contact=?,residence_proof_reference=?,pet_experience=?,household_consent=?,home_visit_consent=?,welfare_commitment=?,proof_document=?,selected_vet_user_id=?,reviewed_by_user_id=NULL,status='Under review',updated_at=CURRENT_TIMESTAMP WHERE user_id=?`, [...values, document, selectedVet.id, req.session.user.id]);
+    else await run(`INSERT INTO verification_applications (user_id,applicant_type,full_name,phone,address,government_id_type,government_id_reference,veterinarian_name,veterinarian_clinic,veterinarian_contact,residence_proof_reference,pet_experience,household_consent,home_visit_consent,welfare_commitment,proof_document,selected_vet_user_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...values, document, selectedVet.id]);
     await run("UPDATE users SET verification_status='Under review' WHERE id=?", [req.session.user.id]);
     req.session.user.verification_status = 'Under review';
-    flash(req, 'success', 'Verification application submitted. Review normally takes 3–5 working days.');
+    await createNotification(selectedVet.id, `vet-review-${req.session.user.id}-${Date.now()}`, 'verification', 'New verification request', `${req.session.user.username} selected you to review their verification.`, '/vet/verifications');
+    pushLive(selectedVet.id, 'notification', { title: 'New verification request', body: `${req.session.user.username} selected you as their reviewing vet.`, url: '/vet/verifications' });
+    flash(req, 'success', `Verification sent to ${selectedVet.username}. You will be verified automatically if they approve it.`);
     res.redirect('/dashboard');
+  } catch (error) { next(error); }
+});
+
+app.get('/vet/verifications', requireLogin, async (req, res, next) => {
+  try {
+    const vet = await get('SELECT * FROM users WHERE id=?', [req.session.user.id]);
+    if (vet?.entity_type !== 'Veterinarian / vet clinic') { flash(req, 'error', 'This review queue is only available to registered vets and clinics.'); return res.redirect('/dashboard'); }
+    const applications = await all(`SELECT verification_applications.*,users.username,users.email,users.profile_photo FROM verification_applications JOIN users ON users.id=verification_applications.user_id WHERE selected_vet_user_id=? ORDER BY CASE verification_applications.status WHEN 'Under review' THEN 1 ELSE 2 END,verification_applications.updated_at DESC`, [vet.id]);
+    res.render('vet-verifications', { title: 'Vet verification requests | PawPath', applications });
+  } catch (error) { next(error); }
+});
+
+app.post('/vet/verifications/:id/decision', requireLogin, async (req, res, next) => {
+  try {
+    const vet = await get('SELECT * FROM users WHERE id=?', [req.session.user.id]);
+    const application = await get('SELECT * FROM verification_applications WHERE id=? AND selected_vet_user_id=?', [req.params.id, req.session.user.id]);
+    if (vet?.entity_type !== 'Veterinarian / vet clinic' || !application) { flash(req, 'error', 'That verification request is not assigned to you.'); return res.redirect('/dashboard'); }
+    const status = req.body.decision === 'approve' ? 'Approved' : 'Rejected';
+    await run('UPDATE verification_applications SET status=?,reviewer_notes=?,reviewed_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [status, String(req.body.reviewer_notes || '').trim(), vet.id, application.id]);
+    await run('UPDATE users SET verification_status=?,verified_at=? WHERE id=?', [status === 'Approved' ? 'Verified' : 'Unverified', status === 'Approved' ? new Date().toISOString() : null, application.user_id]);
+    await createNotification(application.user_id, `verification-decision-${application.id}-${Date.now()}`, 'verification', `Vet verification ${status.toLowerCase()}`, String(req.body.reviewer_notes || '').trim() || `${vet.username} ${status === 'Approved' ? 'approved' : 'did not approve'} your verification request.`, '/dashboard');
+    pushLive(application.user_id, 'notification', { title: `Vet verification ${status.toLowerCase()}`, body: status === 'Approved' ? 'Your profile is now verified.' : 'Open your dashboard to review the decision.', url: '/dashboard' });
+    flash(req, 'success', `Verification ${status.toLowerCase()}. The member profile was updated automatically.`); res.redirect('/vet/verifications');
   } catch (error) { next(error); }
 });
 
