@@ -37,6 +37,8 @@ const networkGroups = {
   organisations: { label: 'Shelters, NGOs & rescue organisations', values: ['Shelter / NGO / rescue organisation'] }
 };
 const NETWORK_PAGE_SIZE = 24;
+const locationCache = new Map();
+let lastGeocoderRequestAt = 0;
 const networkDirectoryCte = `WITH network AS (
   SELECT
     'user' AS source_type,
@@ -113,6 +115,26 @@ function proofFromRequest(req, existing = '') {
   if (!req.file) return existing;
   return `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
 }
+function listValue(value) { return Array.isArray(value) ? value : value ? [value] : []; }
+function requestCoordinates(body, fallbackLocation, seed) {
+  if (String(body.latitude ?? '').trim() === '' || String(body.longitude ?? '').trim() === '') return coordinatesForPlace(fallbackLocation, '', seed);
+  const latitude = Number(body.latitude);
+  const longitude = Number(body.longitude);
+  if (Number.isFinite(latitude) && Number.isFinite(longitude) && latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180) {
+    return { latitude, longitude, location_accuracy: body.location_accuracy || 'exact' };
+  }
+  return coordinatesForPlace(fallbackLocation, '', seed);
+}
+async function createNotification(userId, sourceKey, type, title, body, url) {
+  const existing = await get('SELECT id FROM notifications WHERE source_key=?', [sourceKey]);
+  if (existing) return existing.id;
+  const result = await run('INSERT INTO notifications (user_id,source_key,type,title,body,url) VALUES (?,?,?,?,?,?)', [userId, sourceKey, type, title, body, url]);
+  return result.id;
+}
+function maskedReference(value) {
+  const text = String(value || '');
+  return text.length <= 4 ? '••••' : `${'•'.repeat(Math.min(8, text.length - 4))}${text.slice(-4)}`;
+}
 
 function freshCaptcha(req) {
   const first = Math.floor(Math.random() * 8) + 2;
@@ -137,6 +159,7 @@ function validateAnimal(body) {
   const errors = [];
   const required = ['name', 'locality'];
   required.forEach((field) => { if (!String(body[field] || '').trim()) errors.push(`${field.replace('_', ' ')} is required.`); });
+  if (String(body.locality || '').trim() && (String(body.latitude ?? '').trim() === '' || String(body.longitude ?? '').trim() === '')) errors.push('Choose a suggested location or use Detect my location so this listing can appear accurately on the map.');
   return errors;
 }
 
@@ -148,15 +171,18 @@ function photoFromRequest(req, existingPhoto = '') {
 
 function listingValues(body, photoUrl) {
   const locality = String(body.locality || '').trim();
-  const coordinates = coordinatesForPlace(locality, '', `listing:${body.name || ''}:${locality}`);
+  const coordinates = requestCoordinates(body, locality, `listing:${body.name || ''}:${locality}`);
   const category = body.category || 'Up for Adoption';
   const urgency = category === 'Medical / Rescue SOS' && (!body.urgency || body.urgency === 'Normal')
     ? 'Needs Help Today'
     : body.urgency || 'Normal';
+  const vaccinationNames = listValue(body.vaccination_name);
+  const vaccinationDates = listValue(body.vaccination_date);
+  const vaccinationsDone = vaccinationNames.map((name, index) => ({ name: String(name || '').trim(), date: String(vaccinationDates[index] || '').trim() })).filter((item) => item.name);
   return [
-    String(body.name || '').trim(), body.species || 'Unknown', body.gender || 'Unknown', String(body.age || '').trim() || 'Unknown',
+    String(body.name || '').trim(), body.species || 'Unknown', body.species === 'Other' ? String(body.species_other || '').trim() : '', body.gender || 'Unknown', String(body.age || '').trim() || 'Unknown',
     body.size || 'Unknown', String(body.colour || '').trim() || 'Not added', String(body.temperament || '').trim() || 'Not added',
-    body.vaccinated || 'Unknown', body.sterilised || 'Unknown', String(body.medical_notes || '').trim(), locality,
+    body.vaccinated || 'Unknown', JSON.stringify(vaccinationsDone), String(body.vaccinations_required || '').trim(), body.sterilised || 'Unknown', String(body.medical_notes || '').trim(), locality,
     urgency, category, body.status || 'Reported', photoUrl,
     String(body.description || '').trim() || 'No description added yet.', String(body.contact_details || '').trim(),
     coordinates.latitude, coordinates.longitude, coordinates.location_accuracy
@@ -179,13 +205,34 @@ function listingMatchScore(listing, profile) {
   return Math.min(score, 96);
 }
 
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   if (!req.session.captcha) freshCaptcha(req);
   res.locals.currentUser = req.session.user || null;
   res.locals.flash = req.session.flash || null;
   res.locals.captcha = req.session.captcha;
+  res.locals.currentPath = req.path;
+  res.locals.unreadNotifications = 0;
+  res.locals.unreadMessages = 0;
+  res.locals.notificationAlerts = [];
   delete req.session.flash;
-  next();
+  if (!req.session.user) return next();
+  try {
+    const userId = req.session.user.id;
+    const unannouncedOffers = await all(`SELECT applications.id,applications.request_type,animals.name AS animal_name,users.username AS applicant_name
+      FROM applications JOIN animals ON animals.id=applications.animal_id JOIN users ON users.id=applications.user_id
+      WHERE animals.user_id=?`, [userId]);
+    for (const offer of unannouncedOffers) await createNotification(userId, `offer-${offer.id}`, 'offer', `Offer for ${offer.animal_name}`, `${offer.applicant_name} offered ${offer.request_type.toLowerCase()}.`, `/offers/${offer.id}`);
+    const notificationCount = await get('SELECT COUNT(*) AS count FROM notifications WHERE user_id=? AND dismissed_at IS NULL AND is_read=0', [userId]);
+    const messageCount = await get(`SELECT COUNT(*) AS count FROM messages JOIN conversations ON conversations.id=messages.conversation_id
+      WHERE (conversations.initiator_id=? OR conversations.recipient_id=?) AND messages.sender_id<>?
+      AND messages.created_at > COALESCE(CASE WHEN conversations.initiator_id=? THEN conversations.initiator_read_at ELSE conversations.recipient_read_at END, '1970-01-01')`, [userId, userId, userId, userId]);
+    res.locals.unreadNotifications = Number(notificationCount?.count || 0);
+    res.locals.unreadMessages = Number(messageCount?.count || 0);
+    // Opening an alert marks it read for the badge, but it remains visible until
+    // the person explicitly dismisses it with the × button.
+    res.locals.notificationAlerts = await all('SELECT * FROM notifications WHERE user_id=? AND dismissed_at IS NULL ORDER BY created_at DESC LIMIT 3', [userId]);
+    next();
+  } catch (error) { next(error); }
 });
 
 app.get('/', async (req, res, next) => {
@@ -212,9 +259,42 @@ app.get('/community', (req, res) => res.redirect('/animals?category=Community%20
 
 app.get('/map', (req, res) => res.render('map', { title: 'Live map | PawPath', mapAssets: true }));
 
+async function nominatimRequest(url) {
+  const cached = locationCache.get(url);
+  if (cached && Date.now() - cached.savedAt < 1000 * 60 * 60 * 24) return cached.value;
+  const wait = Math.max(0, 1050 - (Date.now() - lastGeocoderRequestAt));
+  if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastGeocoderRequestAt = Date.now();
+  const response = await fetch(url, { headers: { 'User-Agent': 'PawPath-Student-Project/1.0', 'Accept-Language': 'en' } });
+  if (!response.ok) throw new Error('Location service is temporarily unavailable.');
+  const value = await response.json();
+  locationCache.set(url, { savedAt: Date.now(), value });
+  return value;
+}
+app.get('/api/location-search', async (req, res, next) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 3) return res.json([]);
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=in&limit=5&q=${encodeURIComponent(q)}`;
+    const results = await nominatimRequest(url);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.json(results.map((item) => ({ label: item.display_name, latitude: Number(item.lat), longitude: Number(item.lon) })));
+  } catch (error) { res.status(503).json({ error: error.message }); }
+});
+app.get('/api/location-reverse', async (req, res, next) => {
+  const latitude = Number(req.query.lat ?? req.query.latitude); const longitude = Number(req.query.lon ?? req.query.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return res.status(400).json({ error: 'Valid coordinates are required.' });
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&lat=${latitude}&lon=${longitude}`;
+    const result = await nominatimRequest(url);
+    if (result.address?.country_code && result.address.country_code !== 'in') return res.status(400).json({ error: 'Please choose a location in India.' });
+    res.json({ label: result.display_name || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`, latitude, longitude });
+  } catch (error) { res.status(503).json({ error: error.message }); }
+});
+
 app.get('/api/map-data', async (req, res, next) => {
   try {
-    const animals = await all(`SELECT id,name,species,locality,urgency,category,status,photo_url,latitude,longitude,location_accuracy
+    const animals = await all(`SELECT id,name,species,species_other,locality,urgency,category,status,photo_url,latitude,longitude,location_accuracy
       FROM animals WHERE status NOT IN ('Adopted','Resolved') ORDER BY created_at DESC`);
     const members = await all(`SELECT id,username AS name,entity_type AS category,locality AS location,verification_status,latitude,longitude,location_accuracy
       FROM users ORDER BY username`);
@@ -225,7 +305,7 @@ app.get('/api/map-data', async (req, res, next) => {
       const fallback = coordinatesForPlace(animal.locality, '', `animal:${animal.id}`);
       return {
         id: `listing-${animal.id}`, kind: 'listing', recordId: animal.id, name: animal.name,
-        category: animal.category, subtype: animal.species, location: animal.locality,
+        category: animal.category, subtype: animal.species === 'Other' && animal.species_other ? animal.species_other : animal.species, location: animal.locality,
         urgency: animal.urgency, status: animal.status, photo: animal.photo_url,
         latitude: Number(animal.latitude ?? fallback.latitude), longitude: Number(animal.longitude ?? fallback.longitude),
         locationAccuracy: animal.location_accuracy || fallback.location_accuracy, url: `/animals/${animal.id}`
@@ -341,17 +421,24 @@ app.post('/profiles/:id/chat', requireLogin, async (req, res, next) => {
       if (String(req.body.message || '').trim().length < 12) { flash(req, 'error', 'Please briefly explain why this animal could be a good fit.'); return res.redirect(`/profiles/${req.params.id}#contact`); }
     }
     const score = listing ? listingMatchScore(listing, recipient) : 0;
-    const topic = listing ? `About ${listing.name}` : 'General question';
+    const topic = listing ? `About ${listing.name}` : 'Direct message';
     let conversation = listing
-      ? await get('SELECT id FROM conversations WHERE listing_id=? AND initiator_id=? AND recipient_id=?', [listing.id, req.session.user.id, recipient.id])
-      : await get('SELECT id FROM conversations WHERE listing_id IS NULL AND initiator_id=? AND recipient_id=?', [req.session.user.id, recipient.id]);
+      ? await get('SELECT id FROM conversations WHERE listing_id=? AND ((initiator_id=? AND recipient_id=?) OR (initiator_id=? AND recipient_id=?))', [listing.id, req.session.user.id, recipient.id, recipient.id, req.session.user.id])
+      : await get('SELECT id FROM conversations WHERE listing_id IS NULL AND ((initiator_id=? AND recipient_id=?) OR (initiator_id=? AND recipient_id=?))', [req.session.user.id, recipient.id, recipient.id, req.session.user.id]);
+    let createdNow = false;
     if (!conversation) {
       const created = await run('INSERT INTO conversations (listing_id,initiator_id,recipient_id,compatibility_score,topic) VALUES (?,?,?,?,?)', [listing ? listing.id : null, req.session.user.id, recipient.id, score, topic]);
       conversation = { id: created.id };
-      const firstMessage = String(req.body.message || '').trim() || (listing
-        ? `Hi ${recipient.username}, I think ${listing.name} could be a good match for your support. Would you be open to discussing this listing?`
-        : `Hi ${recipient.username}, I would like to ask for your guidance.`);
-      await run('INSERT INTO messages (conversation_id,sender_id,body) VALUES (?,?,?)', [conversation.id, req.session.user.id, firstMessage]);
+      createdNow = true;
+    }
+    const writtenMessage = String(req.body.message || '').trim();
+    const firstMessage = writtenMessage || (listing
+      ? `Hi ${recipient.username}, I think ${listing.name} could be a good match for your support. Would you be open to discussing this listing?`
+      : `Hi ${recipient.username}, I would like to connect with you on PawPath.`);
+    if (createdNow || writtenMessage) {
+      const message = await run('INSERT INTO messages (conversation_id,sender_id,body) VALUES (?,?,?)', [conversation.id, req.session.user.id, firstMessage]);
+      await run('UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?', [conversation.id]);
+      await createNotification(recipient.id, `message-${message.id}`, 'message', `New message from ${req.session.user.username}`, firstMessage.slice(0, 120), `/messages/${conversation.id}`);
     }
     flash(req, 'success', listing ? `Conversation started. Compatibility: ${score}%.` : 'Conversation started.');
     res.redirect(`/messages/${conversation.id}`);
@@ -362,21 +449,30 @@ app.post('/profiles/:id/approach', requireLogin, (req, res) => res.redirect(307,
 
 app.get('/messages', requireLogin, async (req, res, next) => {
   try {
-    const conversations = await all(`SELECT conversations.*, COALESCE(conversations.topic, animals.name, 'General question') AS topic,
-      CASE WHEN conversations.initiator_id=? THEN recipients.username ELSE initiators.username END AS other_username
+    const rows = await all(`SELECT conversations.*, COALESCE(conversations.topic, animals.name, 'Direct message') AS topic,
+      animals.name AS listing_name, animals.photo_url AS listing_photo,
+      CASE WHEN conversations.initiator_id=? THEN recipients.username ELSE initiators.username END AS other_username,
+      CASE WHEN conversations.initiator_id=? THEN recipients.profile_photo ELSE initiators.profile_photo END AS other_photo
       FROM conversations
       LEFT JOIN animals ON animals.id=conversations.listing_id
       JOIN users AS initiators ON initiators.id=conversations.initiator_id
       JOIN users AS recipients ON recipients.id=conversations.recipient_id
       WHERE conversations.initiator_id=? OR conversations.recipient_id=?
-      ORDER BY conversations.updated_at DESC`, [req.session.user.id, req.session.user.id, req.session.user.id]);
+      ORDER BY conversations.updated_at DESC`, [req.session.user.id, req.session.user.id, req.session.user.id, req.session.user.id]);
+    const conversations = await Promise.all(rows.map(async (conversation) => {
+      const lastMessage = await get('SELECT body,created_at,sender_id FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1', [conversation.id]);
+      const readAt = conversation.initiator_id === req.session.user.id ? conversation.initiator_read_at : conversation.recipient_read_at;
+      const unread = await get("SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND sender_id<>? AND created_at>COALESCE(?, '1970-01-01')", [conversation.id, req.session.user.id, readAt]);
+      return { ...conversation, last_message: lastMessage?.body || 'Conversation started', last_message_at: lastMessage?.created_at || conversation.created_at, unread_count: Number(unread?.count || 0) };
+    }));
     res.render('messages', { title: 'Messages | PawPath', conversations });
   } catch (error) { next(error); }
 });
 
 app.get('/messages/:id', requireLogin, async (req, res, next) => {
   try {
-    const conversation = await get(`SELECT conversations.*, COALESCE(conversations.topic, animals.name, 'General question') AS topic,
+    const conversation = await get(`SELECT conversations.*, COALESCE(conversations.topic, animals.name, 'Direct message') AS topic,
+      animals.name AS listing_name, animals.photo_url AS listing_photo, animals.user_id AS listing_owner_id,
       initiators.username AS initiator_name, recipients.username AS recipient_name
       FROM conversations LEFT JOIN animals ON animals.id=conversations.listing_id
       JOIN users AS initiators ON initiators.id=conversations.initiator_id
@@ -385,9 +481,13 @@ app.get('/messages/:id', requireLogin, async (req, res, next) => {
     if (!conversation || (conversation.initiator_id !== req.session.user.id && conversation.recipient_id !== req.session.user.id)) {
       flash(req, 'error', 'That conversation is not available to you.'); return res.redirect('/messages');
     }
+    const readColumn = conversation.initiator_id === req.session.user.id ? 'initiator_read_at' : 'recipient_read_at';
+    await run(`UPDATE conversations SET ${readColumn}=CURRENT_TIMESTAMP WHERE id=?`, [conversation.id]);
     const messages = await all(`SELECT messages.*, users.username FROM messages JOIN users ON users.id=messages.sender_id WHERE conversation_id=? ORDER BY messages.created_at ASC, messages.id ASC`, [conversation.id]);
-    const otherName = conversation.initiator_id === req.session.user.id ? conversation.recipient_name : conversation.initiator_name;
-    res.render('conversation', { title: `Chat with ${otherName} | PawPath`, conversation, messages, otherName, errors: [] });
+    const otherId = conversation.initiator_id === req.session.user.id ? conversation.recipient_id : conversation.initiator_id;
+    const other = await get('SELECT id,username,profile_photo,verification_status,entity_type,locality,phone,show_phone,public_email,show_public_email FROM users WHERE id=?', [otherId]);
+    const offer = conversation.listing_id ? await get('SELECT * FROM applications WHERE animal_id=? AND user_id IN (?,?) ORDER BY created_at DESC LIMIT 1', [conversation.listing_id, req.session.user.id, otherId]) : null;
+    res.render('conversation', { title: `Chat with ${other.username} | PawPath`, conversation, messages, otherName: other.username, other, offer, errors: [] });
   } catch (error) { next(error); }
 });
 
@@ -397,8 +497,10 @@ app.post('/messages/:id', requireLogin, async (req, res, next) => {
     if (!conversation || (conversation.initiator_id !== req.session.user.id && conversation.recipient_id !== req.session.user.id)) return res.redirect('/messages');
     const body = String(req.body.body || '').trim();
     if (!body || body.length > 1500) { flash(req, 'error', 'Write a message between 1 and 1,500 characters.'); return res.redirect(`/messages/${conversation.id}`); }
-    await run('INSERT INTO messages (conversation_id,sender_id,body) VALUES (?,?,?)', [conversation.id, req.session.user.id, body]);
+    const message = await run('INSERT INTO messages (conversation_id,sender_id,body) VALUES (?,?,?)', [conversation.id, req.session.user.id, body]);
     await run('UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?', [conversation.id]);
+    const recipientId = conversation.initiator_id === req.session.user.id ? conversation.recipient_id : conversation.initiator_id;
+    await createNotification(recipientId, `message-${message.id}`, 'message', `New message from ${req.session.user.username}`, body.slice(0, 120), `/messages/${conversation.id}`);
     res.redirect(`/messages/${conversation.id}`);
   } catch (error) { next(error); }
 });
@@ -427,7 +529,7 @@ app.post('/animals', requireLogin, upload.single('photo'), async (req, res, next
   if (errors.length) return res.status(400).render('animal-form', { title: 'Fix listing details | PawPath', animal: { ...req.body, photo_url: uploadedPhoto }, action: '/animals', formTitle: 'Create an animal profile', errors });
   try {
     const b = req.body;
-    const result = await run(`INSERT INTO animals (user_id,name,species,gender,age,size,colour,temperament,vaccinated,sterilised,medical_notes,locality,urgency,category,status,photo_url,description,contact_details,latitude,longitude,location_accuracy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...listingValues(b, uploadedPhoto)]);
+    const result = await run(`INSERT INTO animals (user_id,name,species,species_other,gender,age,size,colour,temperament,vaccinated,vaccinations_done,vaccinations_required,sterilised,medical_notes,locality,urgency,category,status,photo_url,description,contact_details,latitude,longitude,location_accuracy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...listingValues(b, uploadedPhoto)]);
     flash(req, 'success', 'Animal profile created—thank you for taking action.');
     res.redirect(`/animals/${result.id}`);
   } catch (error) { next(error); }
@@ -444,7 +546,7 @@ app.get('/animals/:id', async (req, res, next) => {
 
 app.get('/animals/:id/edit', requireLogin, async (req, res, next) => {
   try {
-    const animal = await get('SELECT * FROM animals WHERE id = ?', [req.params.id]);
+    const animal = await get('SELECT animals.*, users.username, users.verification_status FROM animals JOIN users ON users.id=animals.user_id WHERE animals.id = ?', [req.params.id]);
     if (!animal || animal.user_id !== req.session.user.id) { flash(req, 'error', 'You can only edit your own listings.'); return res.redirect('/dashboard'); }
     res.render('animal-form', { title: `Edit ${animal.name} | PawPath`, animal, action: `/animals/${animal.id}/edit`, formTitle: `Edit ${animal.name}'s profile`, errors: [] });
   } catch (error) { next(error); }
@@ -457,7 +559,7 @@ app.post('/animals/:id/edit', requireLogin, upload.single('photo'), async (req, 
   if (errors.length) return res.status(400).render('animal-form', { title: 'Fix listing details | PawPath', animal: { ...existing, ...req.body, id: req.params.id, photo_url: uploadedPhoto }, action: `/animals/${req.params.id}/edit`, formTitle: `Edit ${existing.name}'s profile`, errors });
   try {
     const b = req.body;
-    await run(`UPDATE animals SET name=?,species=?,gender=?,age=?,size=?,colour=?,temperament=?,vaccinated=?,sterilised=?,medical_notes=?,locality=?,urgency=?,category=?,status=?,photo_url=?,description=?,contact_details=?,latitude=?,longitude=?,location_accuracy=? WHERE id=?`, [...listingValues(b, uploadedPhoto), existing.id]);
+    await run(`UPDATE animals SET name=?,species=?,species_other=?,gender=?,age=?,size=?,colour=?,temperament=?,vaccinated=?,vaccinations_done=?,vaccinations_required=?,sterilised=?,medical_notes=?,locality=?,urgency=?,category=?,status=?,photo_url=?,description=?,contact_details=?,latitude=?,longitude=?,location_accuracy=? WHERE id=?`, [...listingValues(b, uploadedPhoto), existing.id]);
     flash(req, 'success', 'Animal profile updated.'); res.redirect(`/animals/${existing.id}`);
   } catch (error) { next(error); }
 });
@@ -470,9 +572,9 @@ app.post('/animals/:id/delete', requireLogin, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.post('/animals/:id/apply', requireLogin, async (req, res, next) => {
+app.post('/animals/:id/apply', requireLogin, proofUpload.single('support_document'), async (req, res, next) => {
   try {
-    const animal = await get('SELECT * FROM animals WHERE id = ?', [req.params.id]);
+    const animal = await get('SELECT animals.*, users.username, users.verification_status FROM animals JOIN users ON users.id=animals.user_id WHERE animals.id = ?', [req.params.id]);
     if (!animal) return res.redirect('/animals');
     const b = req.body;
     const errors = [];
@@ -481,8 +583,85 @@ app.post('/animals/:id/apply', requireLogin, async (req, res, next) => {
     if (String(b.message || '').trim().length < 20) errors.push('Please write at least 20 characters about why you can help.');
     const updates = await all('SELECT rescue_updates.*, users.username FROM rescue_updates JOIN users ON users.id = rescue_updates.user_id WHERE animal_id = ? ORDER BY created_at DESC', [animal.id]);
     if (errors.length) return res.status(400).render('animal-detail', { title: `${animal.name} | PawPath`, animal, updates, applicationErrors: errors, application: b });
-    await run(`INSERT INTO applications (animal_id,user_id,request_type,housing_type,locality,pet_experience,working_hours,contact_number,message,compatibility_score) VALUES (?,?,?,?,?,?,?,?,?,?)`, [animal.id, req.session.user.id, b.request_type, b.housing_type, b.locality.trim(), b.pet_experience, b.working_hours, b.contact_number.replace(/\s/g, ''), b.message.trim(), compatibility(b)]);
-    flash(req, 'success', 'Your help offer has been sent to the rescuer.'); res.redirect(`/animals/${animal.id}`);
+    const document = proofFromRequest(req);
+    const result = await run(`INSERT INTO applications (animal_id,user_id,request_type,housing_type,locality,pet_experience,working_hours,contact_number,message,compatibility_score,share_contact,share_profile,share_verification,support_document,support_document_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [animal.id, req.session.user.id, b.request_type, b.housing_type, b.locality.trim(), b.pet_experience, b.working_hours, b.contact_number.replace(/\s/g, ''), b.message.trim(), compatibility(b), b.share_contact === 'on' ? 1 : 0, b.share_profile === 'on' ? 1 : 0, b.share_verification === 'on' ? 1 : 0, document, req.file?.originalname || '']);
+    await createNotification(animal.user_id, `offer-${result.id}`, 'offer', `New ${b.request_type} offer for ${animal.name}`, `${req.session.user.username} sent a help offer. Review their message, contact details and shared documents.`, `/offers/${result.id}`);
+    flash(req, 'success', 'Your help offer has been sent. You can track it from My Dashboard.'); res.redirect(`/offers/${result.id}`);
+  } catch (error) { next(error); }
+});
+
+app.get('/offers/:id', requireLogin, async (req, res, next) => {
+  try {
+    const offer = await get(`SELECT applications.*, animals.name AS animal_name, animals.photo_url AS animal_photo, animals.user_id AS listing_owner_id,
+      applicants.username AS applicant_name, applicants.email AS applicant_email, applicants.profile_photo AS applicant_photo,
+      applicants.verification_status, applicants.entity_type, applicants.bio AS applicant_bio, applicants.locality AS applicant_locality,
+      owners.username AS owner_name, owners.phone AS owner_phone, owners.show_phone AS owner_show_phone,
+      owners.public_email AS owner_public_email, owners.show_public_email AS owner_show_public_email
+      FROM applications JOIN animals ON animals.id=applications.animal_id
+      JOIN users AS applicants ON applicants.id=applications.user_id JOIN users AS owners ON owners.id=animals.user_id
+      WHERE applications.id=?`, [req.params.id]);
+    if (!offer || (offer.user_id !== req.session.user.id && offer.listing_owner_id !== req.session.user.id)) {
+      flash(req, 'error', 'That offer is not available to you.'); return res.redirect('/dashboard');
+    }
+    await run('UPDATE notifications SET is_read=1 WHERE user_id=? AND url=?', [req.session.user.id, `/offers/${offer.id}`]);
+    const verification = offer.share_verification || offer.user_id === req.session.user.id
+      ? await get('SELECT applicant_type,government_id_type,government_id_reference,veterinarian_name,veterinarian_clinic,veterinarian_contact,residence_proof_reference,pet_experience,status,proof_document FROM verification_applications WHERE user_id=?', [offer.user_id])
+      : null;
+    if (verification) verification.masked_government_id = maskedReference(verification.government_id_reference);
+    res.render('offer-detail', { title: `Offer for ${offer.animal_name} | PawPath`, offer, verification, canManage: offer.listing_owner_id === req.session.user.id });
+  } catch (error) { next(error); }
+});
+
+app.post('/offers/:id/status', requireLogin, async (req, res, next) => {
+  try {
+    const offer = await get(`SELECT applications.*, animals.name AS animal_name, animals.user_id AS listing_owner_id FROM applications JOIN animals ON animals.id=applications.animal_id WHERE applications.id=?`, [req.params.id]);
+    if (!offer || offer.listing_owner_id !== req.session.user.id) return res.redirect('/dashboard');
+    const statuses = { accept: 'Accepted', decline: 'Declined', request: 'More information needed' };
+    const status = statuses[req.body.decision];
+    if (!status) return res.redirect(`/offers/${offer.id}`);
+    const ownerNote = String(req.body.owner_note || '').trim();
+    await run('UPDATE applications SET status=?,owner_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [status, ownerNote, offer.id]);
+    await createNotification(offer.user_id, `offer-status-${offer.id}-${Date.now()}`, 'offer_update', `${offer.animal_name}: offer ${status.toLowerCase()}`, ownerNote || `The listing owner marked your offer as ${status.toLowerCase()}.`, `/offers/${offer.id}`);
+    flash(req, 'success', `Offer marked ${status.toLowerCase()}.`); res.redirect(`/offers/${offer.id}`);
+  } catch (error) { next(error); }
+});
+
+app.post('/offers/:id/chat', requireLogin, async (req, res, next) => {
+  try {
+    const offer = await get(`SELECT applications.*, animals.name AS animal_name, animals.user_id AS listing_owner_id FROM applications JOIN animals ON animals.id=applications.animal_id WHERE applications.id=?`, [req.params.id]);
+    if (!offer || (offer.user_id !== req.session.user.id && offer.listing_owner_id !== req.session.user.id)) return res.redirect('/dashboard');
+    const otherId = offer.user_id === req.session.user.id ? offer.listing_owner_id : offer.user_id;
+    let conversation = await get('SELECT id FROM conversations WHERE listing_id=? AND ((initiator_id=? AND recipient_id=?) OR (initiator_id=? AND recipient_id=?))', [offer.animal_id, req.session.user.id, otherId, otherId, req.session.user.id]);
+    if (!conversation) {
+      const created = await run('INSERT INTO conversations (listing_id,initiator_id,recipient_id,compatibility_score,topic) VALUES (?,?,?,?,?)', [offer.animal_id, req.session.user.id, otherId, offer.compatibility_score, `Offer for ${offer.animal_name}`]);
+      conversation = { id: created.id };
+    }
+    const body = String(req.body.message || '').trim() || `Hi, I would like to discuss the ${offer.request_type.toLowerCase()} offer for ${offer.animal_name}.`;
+    const message = await run('INSERT INTO messages (conversation_id,sender_id,body) VALUES (?,?,?)', [conversation.id, req.session.user.id, body]);
+    await run('UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?', [conversation.id]);
+    await createNotification(otherId, `message-${message.id}`, 'message', `New message from ${req.session.user.username}`, body.slice(0, 120), `/messages/${conversation.id}`);
+    res.redirect(`/messages/${conversation.id}`);
+  } catch (error) { next(error); }
+});
+
+app.get('/notifications', requireLogin, async (req, res, next) => {
+  try {
+    const notifications = await all('SELECT * FROM notifications WHERE user_id=? AND dismissed_at IS NULL ORDER BY created_at DESC', [req.session.user.id]);
+    res.render('notifications', { title: 'Notifications | PawPath', notifications });
+  } catch (error) { next(error); }
+});
+app.get('/notifications/:id/open', requireLogin, async (req, res, next) => {
+  try {
+    const notification = await get('SELECT * FROM notifications WHERE id=? AND user_id=?', [req.params.id, req.session.user.id]);
+    if (!notification) return res.redirect('/notifications');
+    await run('UPDATE notifications SET is_read=1 WHERE id=?', [notification.id]);
+    res.redirect(notification.url);
+  } catch (error) { next(error); }
+});
+app.post('/notifications/:id/dismiss', requireLogin, async (req, res, next) => {
+  try {
+    await run('UPDATE notifications SET dismissed_at=CURRENT_TIMESTAMP,is_read=1 WHERE id=? AND user_id=?', [req.params.id, req.session.user.id]);
+    res.redirect(req.get('referer') || '/notifications');
   } catch (error) { next(error); }
 });
 
@@ -507,8 +686,9 @@ app.post('/updates/:id/delete', requireLogin, async (req, res, next) => {
 app.get('/dashboard', requireLogin, async (req, res, next) => {
   try {
     const listings = await all('SELECT * FROM animals WHERE user_id = ? ORDER BY created_at DESC', [req.session.user.id]);
-    const received = await all(`SELECT applications.*, animals.name AS animal_name, users.username AS applicant_name FROM applications JOIN animals ON animals.id=applications.animal_id JOIN users ON users.id=applications.user_id WHERE animals.user_id=? ORDER BY applications.created_at DESC`, [req.session.user.id]);
-    const sent = await all(`SELECT applications.*, animals.name AS animal_name FROM applications JOIN animals ON animals.id=applications.animal_id WHERE applications.user_id=? ORDER BY applications.created_at DESC`, [req.session.user.id]);
+    const received = await all(`SELECT applications.*, animals.name AS animal_name, animals.photo_url AS animal_photo, users.username AS applicant_name, users.verification_status AS applicant_verification FROM applications JOIN animals ON animals.id=applications.animal_id JOIN users ON users.id=applications.user_id WHERE animals.user_id=? ORDER BY applications.created_at DESC`, [req.session.user.id]);
+    const sent = await all(`SELECT applications.*, animals.name AS animal_name, animals.photo_url AS animal_photo, owners.username AS owner_name FROM applications JOIN animals ON animals.id=applications.animal_id JOIN users AS owners ON owners.id=animals.user_id WHERE applications.user_id=? ORDER BY applications.created_at DESC`, [req.session.user.id]);
+    for (const offer of received) await createNotification(req.session.user.id, `offer-${offer.id}`, 'offer', `Offer for ${offer.animal_name}`, `${offer.applicant_name} offered ${offer.request_type.toLowerCase()}.`, `/offers/${offer.id}`);
     const profile = await get('SELECT * FROM users WHERE id=?', [req.session.user.id]);
     const verification = await get('SELECT * FROM verification_applications WHERE user_id=?', [req.session.user.id]);
     res.render('dashboard', { title: 'My Dashboard | PawPath', listings, received, sent, profile, verification });
@@ -524,6 +704,8 @@ app.post('/signup', proofUpload.single('verification_document'), async (req, res
   if (String(password || '').length < 8) errors.push('Password must have at least 8 characters.');
   if (password !== confirm_password) errors.push('Passwords do not match.');
   if (!Object.values(networkGroups).flatMap((group) => group.values).includes(entity_type)) errors.push('Please choose how you will participate in the PawPath network.');
+  if (!String(locality || '').trim()) errors.push('Choose your location so your profile can appear on the PawPath map.');
+  if (String(locality || '').trim() && (String(req.body.latitude ?? '').trim() === '' || String(req.body.longitude ?? '').trim() === '')) errors.push('Select a suggested location or use Detect my location.');
   if (phone && !/^\d{10}$/.test(String(phone).replace(/\s/g, ''))) errors.push('Enter a valid 10-digit phone number, or leave it blank.');
   if (public_email && !/^\S+@\S+\.\S+$/.test(String(public_email))) errors.push('Enter a valid public email address, or leave it blank.');
   if (website && !safeWebsite(website)) errors.push('Enter a valid website address, or leave it blank.');
@@ -533,7 +715,7 @@ app.post('/signup', proofUpload.single('verification_document'), async (req, res
     const exists = await get('SELECT id FROM users WHERE email = ? OR username = ?', [email.trim().toLowerCase(), username.trim()]);
     if (exists) return res.status(400).render('signup', { title: 'Join PawPath', errors: ['An account with that email or username already exists.'], values: req.body });
     const hash = await bcrypt.hash(password, 10);
-    const memberGeo = coordinatesForPlace(locality, '', `member:${email}`);
+    const memberGeo = requestCoordinates(req.body, String(locality || '').trim(), `member:${email}`);
     const result = await run(`INSERT INTO users (username,email,password_hash,role,locality,entity_type,organisation_name,phone,show_phone,public_email,show_public_email,instagram_handle,show_instagram,website,show_website,verification_document,latitude,longitude,location_accuracy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
       username.trim(), email.trim().toLowerCase(), hash, role || 'Community member', String(locality || '').trim(), entity_type,
       String(organisation_name || '').trim(), String(phone || '').replace(/\s/g, ''), req.body.show_phone === 'on' ? 1 : 0,

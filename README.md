@@ -8,7 +8,11 @@ PawPath connects animals in need with accountable rescuers, fosters, adopters, c
 - Standard signup plus a separate verification application covering identity, residence, veterinary reference, home-check consent and welfare commitments.
 - Ten seeded verified demo profiles with twelve animal listings.
 - 3,679 imported public network records: 26 rescue/volunteer contacts, 34 veterinary records and 3,619 AWBI-recognised organisations.
-- Smooth vector India map powered by MapLibre and OpenFreeMap, with clustered Listings and Network layers, SOS highlighting, search, category filters and browser-based “near me”.
+- Smooth vector India map powered by MapLibre and OpenFreeMap, with distinct animal, SOS, clinic, shelter and volunteer markers, search, category filters and browser-based “near me”.
+- Listing-linked inbox with unread counts, persistent notifications and a complete offer workflow: review, request information, accept, decline and message.
+- Consent-based sharing for offer contact details, profiles, verification evidence and supporting vet/reference documents.
+- Exact India address autocomplete and “Detect my location” for new accounts and listings, so new map pins use saved coordinates.
+- Structured species and care data, including named “Other” animals, vaccination history and vaccinations still required.
 - Cinematic featured-rescue carousel plus scroll-led reveals, scale transitions, sticky scenes and map camera movement across the Explore page.
 - Twelve distinct demo-animal photographs—no repeated listing image.
 - Logged-in users see other people’s listings before their own.
@@ -29,7 +33,7 @@ The first `npm start` imports the India directory. Later starts skip the import 
 
 ## Map locations
 
-The map uses MapLibre with OpenFreeMap vector tiles and native point clustering, so it does not require a Google Maps API key. Place labels prefer English and Latin-script names when the map data provides them. Seeded Indore listings use locality-level coordinates. Nationwide directory records are placed from the city, district or state supplied by their public source and are labelled as approximate in the interface. PawPath does not claim that an approximate pin is a precise entrance or live rescue location.
+The map uses MapLibre with OpenFreeMap vector tiles, so it does not require a Google Maps API key. Place labels prefer English and Latin-script names when the map data provides them. New profiles and animal reports use OpenStreetMap's Nominatim search/reverse-geocoding service to save a selected pin. Seeded Indore listings use locality-level coordinates. Nationwide directory records are placed from the city, district or state supplied by their public source and are labelled as approximate in the interface. PawPath does not claim that an approximate pin is a precise entrance or live rescue location.
 
 The migration adds `latitude`, `longitude` and `location_accuracy` to users, animal listings and public directory entries without deleting existing records. The updated directory source version runs once on the next deploy and safely refreshes the 3,679 imported map points.
 
@@ -84,4 +88,4 @@ The original input files and the normalized AWBI CSV are stored in `data/imports
 
 ## Verification safety note
 
-The prototype stores references or secure links, not uploaded documents. A real production review operation should use encrypted private document storage, access controls, deletion schedules and a manual reviewer dashboard. Never collect a full Aadhaar number in a general text field.
+This student prototype can store consent-shared offer and verification files in the application database. Before real-world production use, move them to encrypted private object storage with expiring signed links, strict access controls, deletion schedules and audit logging. Never collect a full Aadhaar number in a general text field.

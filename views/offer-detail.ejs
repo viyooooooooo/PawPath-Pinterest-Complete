@@ -1,0 +1,33 @@
+<%- include('partials/header') %>
+<section class="offer-page">
+  <a class="text-link" href="/dashboard">← Back to dashboard</a>
+  <div class="offer-hero">
+    <div><span class="kicker"><%= canManage ? 'OFFER RECEIVED' : 'OFFER SENT' %></span><h1><%= offer.request_type %> for <%= offer.animal_name %></h1><p>Review the complete offer, shared references and next actions in one place.</p></div>
+    <span class="offer-status status-<%= offer.status.toLowerCase().replaceAll(' ','-') %>"><%= offer.status %></span>
+  </div>
+  <div class="offer-layout">
+    <main>
+      <article class="offer-card applicant-card">
+        <div class="offer-person"><% if (offer.applicant_photo) { %><img src="<%= offer.applicant_photo %>" alt=""><% } else { %><span><%= offer.applicant_name.charAt(0).toUpperCase() %></span><% } %><div><small>OFFER FROM</small><h2><%= offer.applicant_name %></h2><p><%= offer.entity_type %> · <%= offer.applicant_locality || offer.locality %></p></div></div>
+        <div class="offer-badges"><span><%= offer.verification_status === 'Verified' ? '✓ PawPath verified' : 'Unverified profile' %></span><span><%= offer.compatibility_score %>% starting compatibility</span></div>
+        <blockquote><%= offer.message %></blockquote>
+        <% if (offer.share_profile || offer.user_id === currentUser.id) { %><p><%= offer.applicant_bio || 'No profile introduction has been added yet.' %></p><a class="text-link" href="/profiles/<%= offer.user_id %>">Open full profile →</a><% } else { %><p class="privacy-card">This applicant did not share their full profile with this offer.</p><% } %>
+      </article>
+
+      <article class="offer-card"><span class="kicker">CONTACT & PRACTICAL DETAILS</span><h2>Continue the conversation</h2><div class="offer-facts"><% if (offer.share_contact || offer.user_id === currentUser.id) { %><div><small>Phone number</small><a href="tel:<%= offer.contact_number %>"><%= offer.contact_number %></a></div><div><small>Email</small><a href="mailto:<%= offer.applicant_email %>"><%= offer.applicant_email %></a></div><% } else { %><div><small>Contact privacy</small><strong>Use PawPath chat</strong></div><% } %><div><small>Housing</small><strong><%= offer.housing_type %></strong></div><div><small>Experience</small><strong><%= offer.pet_experience %></strong></div><div><small>Locality</small><strong><%= offer.locality %></strong></div><div><small>Daily working hours</small><strong><%= offer.working_hours %></strong></div></div>
+        <% if (!canManage && (offer.owner_show_phone || offer.owner_show_public_email)) { %><div class="owner-contact"><strong><%= offer.owner_name %> has shared:</strong><% if (offer.owner_show_phone) { %><a href="tel:<%= offer.owner_phone %>">Call <%= offer.owner_phone %></a><% } %><% if (offer.owner_show_public_email) { %><a href="mailto:<%= offer.owner_public_email %>">Email <%= offer.owner_public_email %></a><% } %></div><% } %>
+        <form method="post" action="/offers/<%= offer.id %>/chat" class="offer-chat-action"><textarea name="message" rows="2" placeholder="Add an opening message, or continue directly in chat…"></textarea><button class="button">Message <%= canManage ? offer.applicant_name : offer.owner_name %> →</button></form>
+      </article>
+
+      <article class="offer-card"><span class="kicker">SHARED EVIDENCE</span><h2>References and documents</h2>
+        <% if (offer.support_document) { %><a class="document-tile" href="<%= offer.support_document %>" target="_blank" rel="noopener"><span>📎</span><div><strong><%= offer.support_document_name || 'Supporting document' %></strong><small>Uploaded specifically with this offer</small></div><b>Open ↗</b></a><% } %>
+        <% if (verification) { %><div class="verification-share"><div><small>Verification status</small><strong><%= verification.status %></strong></div><div><small><%= verification.government_id_type %> reference</small><strong><%= verification.masked_government_id %></strong></div><div><small>Veterinary reference</small><strong><%= verification.veterinarian_name %> · <%= verification.veterinarian_clinic %></strong></div><div><small>Vet contact</small><strong><%= verification.veterinarian_contact %></strong></div><div><small>Experience statement</small><strong><%= verification.pet_experience %></strong></div></div><% if (verification.proof_document) { %><a class="document-tile" href="<%= verification.proof_document %>" target="_blank" rel="noopener"><span>🪪</span><div><strong>Consent-shared verification proof</strong><small>Sensitive document—use only to assess this offer</small></div><b>Open ↗</b></a><% } %><% } else if (!offer.support_document) { %><p class="privacy-card">No verification file or supporting reference was shared with this offer. Ask for one through chat if it is relevant.</p><% } %>
+      </article>
+    </main>
+    <aside>
+      <article class="offer-animal-card"><% if (offer.animal_photo) { %><img src="<%= offer.animal_photo %>" alt="<%= offer.animal_name %>"><% } %><div><small>THIS OFFER IS FOR</small><h2><%= offer.animal_name %></h2><a class="text-link" href="/animals/<%= offer.animal_id %>">Open listing →</a></div></article>
+      <% if (canManage) { %><form method="post" action="/offers/<%= offer.id %>/status" class="offer-decision-card"><span class="kicker">YOUR DECISION</span><h2>What happens next?</h2><textarea name="owner_note" rows="4" placeholder="Add a note, question, meeting detail or reason…"><%= offer.owner_note || '' %></textarea><div><button class="button" name="decision" value="accept">Accept offer</button><button class="button button-soft" name="decision" value="request">Ask for more information</button><button class="text-button danger-button" name="decision" value="decline">Decline</button></div></form><% } else { %><article class="offer-decision-card"><span class="kicker">CURRENT STATUS</span><h2><%= offer.status %></h2><p><%= offer.owner_note || 'The listing owner has not added a response yet.' %></p></article><% } %>
+    </aside>
+  </div>
+</section>
+<%- include('partials/footer') %>

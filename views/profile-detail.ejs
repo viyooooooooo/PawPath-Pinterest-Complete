@@ -10,7 +10,7 @@
     <div class="contact-copy"><span class="kicker">CONTACT <%= profile.username.toUpperCase() %></span><h2>Start a private conversation</h2><p>Ask a general question—or suggest one of your active listings and explain why their support could be a good fit.</p></div>
     <div class="contact-options">
       <form method="post" action="/profiles/<%= profile.id %>/chat" class="approach-form">
-        <strong>General question</strong><label>Your opening message<textarea name="message" rows="3" maxlength="1500" placeholder="Hi <%= profile.username %>, I wanted to ask about…"></textarea></label><button class="button" type="submit">Message <%= profile.username %> →</button>
+        <strong>Direct message</strong><label>Your opening message<textarea name="message" rows="3" maxlength="1500" placeholder="Hi <%= profile.username %>, I wanted to ask about…"></textarea></label><button class="button" type="submit">Message <%= profile.username %> →</button>
       </form>
       <% if (ownListings.length) { %>
       <form method="post" action="/profiles/<%= profile.id %>/chat" class="approach-form listing-message-form">

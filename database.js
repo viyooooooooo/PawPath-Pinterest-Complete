@@ -70,13 +70,14 @@ async function allowGeneralConversations() {
     id INTEGER PRIMARY KEY AUTOINCREMENT, listing_id INTEGER,
     initiator_id INTEGER NOT NULL, recipient_id INTEGER NOT NULL,
     compatibility_score INTEGER NOT NULL DEFAULT 0, topic TEXT,
+    initiator_read_at TEXT, recipient_read_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(listing_id, initiator_id, recipient_id),
     FOREIGN KEY (listing_id) REFERENCES animals(id) ON DELETE CASCADE,
     FOREIGN KEY (initiator_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
-  await run('INSERT INTO conversations_new (id,listing_id,initiator_id,recipient_id,compatibility_score,topic,created_at,updated_at) SELECT id,listing_id,initiator_id,recipient_id,compatibility_score,topic,created_at,updated_at FROM conversations');
+  await run('INSERT INTO conversations_new (id,listing_id,initiator_id,recipient_id,compatibility_score,topic,initiator_read_at,recipient_read_at,created_at,updated_at) SELECT id,listing_id,initiator_id,recipient_id,compatibility_score,topic,initiator_read_at,recipient_read_at,created_at,updated_at FROM conversations');
   await run(`CREATE TABLE messages_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL,
     sender_id INTEGER NOT NULL, body TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -171,8 +172,9 @@ async function initialiseDatabase() {
 
   await run(`CREATE TABLE IF NOT EXISTS animals (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, species TEXT NOT NULL,
+    species_other TEXT,
     gender TEXT NOT NULL, age TEXT NOT NULL, size TEXT NOT NULL, colour TEXT NOT NULL, temperament TEXT NOT NULL,
-    vaccinated TEXT NOT NULL, sterilised TEXT NOT NULL, medical_notes TEXT, locality TEXT NOT NULL,
+    vaccinated TEXT NOT NULL, vaccinations_done TEXT, vaccinations_required TEXT, sterilised TEXT NOT NULL, medical_notes TEXT, locality TEXT NOT NULL,
     urgency TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Reported', photo_url TEXT,
     description TEXT NOT NULL, contact_details TEXT, latitude REAL, longitude REAL, location_accuracy TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -182,15 +184,29 @@ async function initialiseDatabase() {
   await addColumn('animals', 'latitude REAL');
   await addColumn('animals', 'longitude REAL');
   await addColumn('animals', 'location_accuracy TEXT');
+  await addColumn('animals', 'species_other TEXT');
+  await addColumn('animals', 'vaccinations_done TEXT');
+  await addColumn('animals', 'vaccinations_required TEXT');
 
   await run(`CREATE TABLE IF NOT EXISTS applications (
     id INTEGER PRIMARY KEY AUTOINCREMENT, animal_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
     request_type TEXT NOT NULL, housing_type TEXT NOT NULL, locality TEXT NOT NULL, pet_experience TEXT NOT NULL,
     working_hours TEXT NOT NULL, contact_number TEXT NOT NULL, message TEXT NOT NULL,
-    compatibility_score INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    compatibility_score INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'Pending', share_contact INTEGER NOT NULL DEFAULT 1,
+    share_profile INTEGER NOT NULL DEFAULT 1, share_verification INTEGER NOT NULL DEFAULT 0,
+    support_document TEXT, support_document_name TEXT, owner_note TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (animal_id) REFERENCES animals(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
+  await addColumn('applications', "status TEXT NOT NULL DEFAULT 'Pending'");
+  await addColumn('applications', 'share_contact INTEGER NOT NULL DEFAULT 1');
+  await addColumn('applications', 'share_profile INTEGER NOT NULL DEFAULT 1');
+  await addColumn('applications', 'share_verification INTEGER NOT NULL DEFAULT 0');
+  await addColumn('applications', 'support_document TEXT');
+  await addColumn('applications', 'support_document_name TEXT');
+  await addColumn('applications', 'owner_note TEXT');
+  await addColumn('applications', 'updated_at TEXT');
 
   await run(`CREATE TABLE IF NOT EXISTS rescue_updates (
     id INTEGER PRIMARY KEY AUTOINCREMENT, animal_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
@@ -219,6 +235,8 @@ async function initialiseDatabase() {
     recipient_id INTEGER NOT NULL,
     compatibility_score INTEGER NOT NULL,
     topic TEXT,
+    initiator_read_at TEXT,
+    recipient_read_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(listing_id, initiator_id, recipient_id),
@@ -237,7 +255,28 @@ async function initialiseDatabase() {
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
   await addColumn('conversations', 'topic TEXT');
+  await addColumn('conversations', 'initiator_read_at TEXT');
+  await addColumn('conversations', 'recipient_read_at TEXT');
+
+  await run(`CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    source_key TEXT NOT NULL UNIQUE,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    url TEXT NOT NULL,
+    is_read INTEGER NOT NULL DEFAULT 0,
+    dismissed_at TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  await run('CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, dismissed_at, is_read)');
   await allowGeneralConversations();
+  // The SQLite compatibility rebuild above can replace the conversations table.
+  // Re-assert these columns afterwards so upgrades from every older schema work.
+  await addColumn('conversations', 'initiator_read_at TEXT');
+  await addColumn('conversations', 'recipient_read_at TEXT');
 }
 
 module.exports = { run, get, all, initialiseDatabase, usingPostgres };

@@ -1,0 +1,13 @@
+<%- include('partials/header') %>
+<section class="activity-page">
+  <div class="activity-heading"><div><span class="kicker">PAWPATH ACTIVITY</span><h1>Notifications</h1><p>Offers, replies and important changes stay here until you dismiss them.</p></div><span class="activity-count"><%= notifications.filter(item => !item.is_read).length %> unread</span></div>
+  <div class="notification-list">
+    <% if (notifications.length) { notifications.forEach(notification => { %>
+      <article class="notification-item <%= notification.is_read ? '' : 'is-unread' %>">
+        <a href="/notifications/<%= notification.id %>/open"><span class="notification-symbol"><%= notification.type === 'offer' ? '🤝' : notification.type === 'message' ? '💬' : '✓' %></span><div><strong><%= notification.title %></strong><p><%= notification.body %></p><small><%= new Date(notification.created_at).toLocaleString() %></small></div><b>View →</b></a>
+        <form method="post" action="/notifications/<%= notification.id %>/dismiss"><button aria-label="Dismiss notification">×</button></form>
+      </article>
+    <% }) } else { %><div class="empty-state"><h2>You’re all caught up.</h2><p>New offers and messages will appear here.</p></div><% } %>
+  </div>
+</section>
+<%- include('partials/footer') %>
