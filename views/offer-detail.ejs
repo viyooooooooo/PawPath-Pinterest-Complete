@@ -10,7 +10,7 @@
       <article class="offer-card applicant-card">
         <div class="offer-person"><% if (offer.applicant_photo) { %><img src="<%= offer.applicant_photo %>" alt=""><% } else { %><span><%= offer.applicant_name.charAt(0).toUpperCase() %></span><% } %><div><small>OFFER FROM</small><h2><%= offer.applicant_name %></h2><p><%= offer.entity_type %> · <%= offer.applicant_locality || offer.locality %></p></div></div>
         <div class="offer-badges"><span><%= offer.verification_status === 'Verified' ? '✓ PawPath verified' : 'Unverified profile' %></span><span><%= offer.compatibility_score %>% starting compatibility</span></div>
-        <blockquote><%= offer.message %></blockquote>
+        <% if (offer.message) { %><blockquote><%= offer.message %></blockquote><% } else { %><p class="privacy-card">No additional note was added with this offer.</p><% } %>
         <% if (offer.share_profile || offer.user_id === currentUser.id) { %><p><%= offer.applicant_bio || 'No profile introduction has been added yet.' %></p><a class="text-link" href="/profiles/<%= offer.user_id %>">Open full profile →</a><% } else { %><p class="privacy-card">This applicant did not share their full profile with this offer.</p><% } %>
       </article>
 

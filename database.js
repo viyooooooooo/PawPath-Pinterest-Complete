@@ -187,11 +187,12 @@ async function initialiseDatabase() {
     gender TEXT NOT NULL, age TEXT NOT NULL, size TEXT NOT NULL, colour TEXT NOT NULL, temperament TEXT NOT NULL,
     vaccinated TEXT NOT NULL, vaccinations_done TEXT, vaccinations_required TEXT, sterilised TEXT NOT NULL, medical_notes TEXT, locality TEXT NOT NULL,
     urgency TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Reported', photo_url TEXT,
-    description TEXT NOT NULL, contact_details TEXT, latitude REAL, longitude REAL, location_accuracy TEXT,
+    description TEXT NOT NULL, contact_details TEXT, location_status TEXT NOT NULL DEFAULT 'last_spotted', latitude REAL, longitude REAL, location_accuracy TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
   await addColumn('animals', 'contact_details TEXT');
+  await addColumn('animals', "location_status TEXT NOT NULL DEFAULT 'last_spotted'");
   await addColumn('animals', 'latitude REAL');
   await addColumn('animals', 'longitude REAL');
   await addColumn('animals', 'location_accuracy TEXT');

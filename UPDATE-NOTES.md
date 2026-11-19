@@ -71,3 +71,12 @@ Existing PostgreSQL data is preserved. New columns are added automatically when 
 - Each featured dog receives a different editorial headline instead of repeating “needs a safe next step.”
 - Added a dedicated, non-transitioning paw-pattern layer inside the first Explore carousel so the artwork always remains behind every photo and text slide.
 
+# Location context and offer-form update
+
+- New and edited listings now ask whether the animal is currently with the lister or was last spotted elsewhere.
+- The location question changes accordingly, supports searchable Indian addresses and a browser pin, and never silently copies the member profile location.
+- Listing pages show a dedicated location-status box with the chosen address and map pin.
+- The help-offer locality now has the same searchable pin and detect-location controls used elsewhere.
+- The additional offer explanation is optional and no longer blocks submission.
+- Complete Explore carousel headlines now use the same bold, high-contrast treatment as the animal name.
+

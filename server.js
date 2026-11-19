@@ -193,8 +193,9 @@ function requireAdmin(req, res, next) {
 }
 function validateAnimal(body) {
   const errors = [];
-  const required = ['name', 'locality'];
+  const required = ['name', 'locality', 'location_status'];
   required.forEach((field) => { if (!String(body[field] || '').trim()) errors.push(`${field.replace('_', ' ')} is required.`); });
+  if (body.location_status && !['with_lister', 'last_spotted'].includes(body.location_status)) errors.push('Choose whether the animal is currently with you or was last spotted elsewhere.');
   return errors;
 }
 
@@ -217,7 +218,7 @@ function listingValues(body, photoUrl) {
   return [
     String(body.name || '').trim(), body.species || 'Unknown', body.species === 'Other' ? String(body.species_other || '').trim() : '', body.gender || 'Unknown', String(body.age || '').trim() || 'Unknown',
     body.size || 'Unknown', String(body.colour || '').trim() || 'Not added', String(body.temperament || '').trim() || 'Not added',
-    body.vaccinated || 'Unknown', JSON.stringify(vaccinationsDone), String(body.vaccinations_required || '').trim(), body.sterilised || 'Unknown', String(body.medical_notes || '').trim(), locality,
+    body.vaccinated || 'Unknown', JSON.stringify(vaccinationsDone), String(body.vaccinations_required || '').trim(), body.sterilised || 'Unknown', String(body.medical_notes || '').trim(), locality, body.location_status || 'last_spotted',
     urgency, category, body.status || 'Reported', photoUrl,
     String(body.description || '').trim() || 'No description added yet.', String(body.contact_details || '').trim(),
     coordinates.latitude, coordinates.longitude, coordinates.location_accuracy
@@ -641,7 +642,7 @@ app.post('/animals', requireLogin, upload.single('photo'), async (req, res, next
   if (errors.length) return res.status(400).render('animal-form', { title: 'Fix listing details | PawPath', animal: { ...req.body, photo_url: uploadedPhoto }, action: '/animals', formTitle: 'Create an animal profile', errors });
   try {
     const b = req.body;
-    const result = await run(`INSERT INTO animals (user_id,name,species,species_other,gender,age,size,colour,temperament,vaccinated,vaccinations_done,vaccinations_required,sterilised,medical_notes,locality,urgency,category,status,photo_url,description,contact_details,latitude,longitude,location_accuracy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...listingValues(b, uploadedPhoto)]);
+    const result = await run(`INSERT INTO animals (user_id,name,species,species_other,gender,age,size,colour,temperament,vaccinated,vaccinations_done,vaccinations_required,sterilised,medical_notes,locality,location_status,urgency,category,status,photo_url,description,contact_details,latitude,longitude,location_accuracy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...listingValues(b, uploadedPhoto)]);
     flash(req, 'success', 'Animal profile created—thank you for taking action.');
     res.redirect(`/animals/${result.id}`);
   } catch (error) { next(error); }
@@ -673,7 +674,7 @@ app.post('/animals/:id/edit', requireLogin, upload.single('photo'), async (req, 
   if (errors.length) return res.status(400).render('animal-form', { title: 'Fix listing details | PawPath', animal: { ...existing, ...req.body, id: req.params.id, photo_url: uploadedPhoto }, action: `/animals/${req.params.id}/edit`, formTitle: `Edit ${existing.name}'s profile`, errors });
   try {
     const b = req.body;
-    await run(`UPDATE animals SET name=?,species=?,species_other=?,gender=?,age=?,size=?,colour=?,temperament=?,vaccinated=?,vaccinations_done=?,vaccinations_required=?,sterilised=?,medical_notes=?,locality=?,urgency=?,category=?,status=?,photo_url=?,description=?,contact_details=?,latitude=?,longitude=?,location_accuracy=? WHERE id=?`, [...listingValues(b, uploadedPhoto), existing.id]);
+    await run(`UPDATE animals SET name=?,species=?,species_other=?,gender=?,age=?,size=?,colour=?,temperament=?,vaccinated=?,vaccinations_done=?,vaccinations_required=?,sterilised=?,medical_notes=?,locality=?,location_status=?,urgency=?,category=?,status=?,photo_url=?,description=?,contact_details=?,latitude=?,longitude=?,location_accuracy=? WHERE id=?`, [...listingValues(b, uploadedPhoto), existing.id]);
     flash(req, 'success', 'Animal profile updated.'); res.redirect(`/animals/${existing.id}`);
   } catch (error) { next(error); }
 });
@@ -693,13 +694,12 @@ app.post('/animals/:id/apply', requireLogin, proofUpload.single('support_documen
     if (['Adopted', 'Resolved'].includes(animal.status)) { flash(req, 'error', 'This listing is complete because an offer has already been accepted.'); return res.redirect(`/animals/${animal.id}`); }
     const b = req.body;
     const errors = [];
-    ['request_type', 'housing_type', 'locality', 'pet_experience', 'working_hours', 'contact_number', 'message'].forEach((field) => { if (!String(b[field] || '').trim()) errors.push(`${field.replace('_', ' ')} is required.`); });
+    ['request_type', 'housing_type', 'locality', 'pet_experience', 'working_hours', 'contact_number'].forEach((field) => { if (!String(b[field] || '').trim()) errors.push(`${field.replace('_', ' ')} is required.`); });
     if (!/^\d{10}$/.test(String(b.contact_number || '').replace(/\s/g, ''))) errors.push('Enter a valid 10-digit contact number.');
-    if (String(b.message || '').trim().length < 20) errors.push('Please write at least 20 characters about why you can help.');
     const updates = await all('SELECT rescue_updates.*, users.username FROM rescue_updates JOIN users ON users.id = rescue_updates.user_id WHERE animal_id = ? ORDER BY created_at DESC', [animal.id]);
     if (errors.length) return res.status(400).render('animal-detail', { title: `${animal.name} | PawPath`, animal, updates, applicationErrors: errors, application: b });
     const document = proofFromRequest(req);
-    const result = await run(`INSERT INTO applications (animal_id,user_id,request_type,housing_type,locality,pet_experience,working_hours,contact_number,message,compatibility_score,share_contact,share_profile,share_verification,support_document,support_document_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [animal.id, req.session.user.id, b.request_type, b.housing_type, b.locality.trim(), b.pet_experience, b.working_hours, b.contact_number.replace(/\s/g, ''), b.message.trim(), compatibility(b), b.share_contact === 'on' ? 1 : 0, b.share_profile === 'on' ? 1 : 0, b.share_verification === 'on' ? 1 : 0, document, req.file?.originalname || '']);
+    const result = await run(`INSERT INTO applications (animal_id,user_id,request_type,housing_type,locality,pet_experience,working_hours,contact_number,message,compatibility_score,share_contact,share_profile,share_verification,support_document,support_document_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [animal.id, req.session.user.id, b.request_type, b.housing_type, b.locality.trim(), b.pet_experience, b.working_hours, b.contact_number.replace(/\s/g, ''), String(b.message || '').trim(), compatibility(b), b.share_contact === 'on' ? 1 : 0, b.share_profile === 'on' ? 1 : 0, b.share_verification === 'on' ? 1 : 0, document, req.file?.originalname || '']);
     await run('INSERT INTO rescue_updates (animal_id,user_id,update_text,update_type,is_automatic) VALUES (?,?,?,?,1)', [animal.id, req.session.user.id, `${req.session.user.username} sent a ${b.request_type.toLowerCase()} offer.`, 'Offer received']);
     await createNotification(animal.user_id, `offer-${result.id}`, 'offer', `New ${b.request_type} offer for ${animal.name}`, `${req.session.user.username} sent a help offer. Review their message, contact details and shared documents.`, `/offers/${result.id}`);
     pushLive(animal.user_id, 'offer', { offerId: result.id, animalId: animal.id, title: `New ${b.request_type} offer for ${animal.name}`, body: `${req.session.user.username} sent a help offer.` });

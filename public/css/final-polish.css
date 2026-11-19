@@ -61,3 +61,16 @@ html,body{max-width:100%;overflow-x:clip}
 .tail-flashcard{box-shadow:0 35px 90px rgba(0,0,0,.28)}
 @media(max-width:950px){.hero-animal-photo{width:34%}.collage-photo-7{display:none}}
 @media(max-width:600px){.hero-animal-photo{width:48%;height:34%;border-width:5px}.hero-animal-photo:nth-child(n+5){display:none}.collage-photo{width:86px;border-width:4px}.collage-photo-5,.collage-photo-6,.collage-photo-7{display:none}.collage-photo figcaption{display:none}}
+
+/* Clear listing-location flow and readable Explore headlines. */
+.explore-experience .rescue-slide h1,.explore-experience .rescue-slide h1 span{color:var(--ink)!important;font-weight:800!important;opacity:1!important}
+.animal-location-choice{grid-column:1/-1;display:flex;gap:12px;flex-wrap:wrap;margin:0;padding:17px;border:1px solid var(--line);border-radius:15px;background:var(--cream)}
+.animal-location-choice legend{padding:0 6px;font:800 .9rem var(--display)}
+.animal-location-choice label{display:flex;grid-template-columns:auto 1fr;align-items:center;gap:8px;padding:10px 12px;border-radius:11px;background:#fff;font-weight:700;cursor:pointer}
+.animal-location-choice input{width:auto;margin:0;accent-color:var(--green)}
+.animal-location-choice small{flex-basis:100%;color:var(--muted);font-weight:500}
+.listing-location-box{display:grid;grid-template-columns:42px 1fr;gap:13px;margin:20px 0;padding:17px;border:1px solid #b8d0c0;border-radius:16px;background:linear-gradient(135deg,#edf7ef,#f8f5eb)}
+.listing-location-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:var(--green);color:#fff;font-size:1.35rem}
+.listing-location-box div{display:grid;gap:4px;min-width:0}.listing-location-box small{color:var(--green);font-size:.66rem;font-weight:800;letter-spacing:.1em}.listing-location-box strong{font-size:.96rem;overflow-wrap:anywhere}.listing-location-box p{margin:2px 0;color:var(--muted);font-size:.76rem}.listing-location-box a{width:max-content;color:var(--green);font-size:.76rem;font-weight:800;text-decoration:underline;text-underline-offset:3px}
+.application-location{grid-template-columns:1fr}.application-location .detect-location{width:100%}.application-location .location-suggestions{top:calc(100% - 30px)}
+@media(max-width:600px){.animal-location-choice{display:grid}.listing-location-box{grid-template-columns:36px 1fr}.listing-location-icon{width:36px;height:36px}}

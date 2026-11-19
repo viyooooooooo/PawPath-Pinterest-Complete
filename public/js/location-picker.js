@@ -8,6 +8,7 @@
     const results = picker.querySelector('[data-location-results]');
     const status = picker.querySelector('[data-location-status]');
     const detect = picker.querySelector('[data-detect-location]');
+    const detectLabel = detect?.textContent || '⌖ Detect my location';
     let timer;
 
     const selectLocation = (place) => {
@@ -50,8 +51,8 @@
           selectLocation({ label: `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`, latitude: coords.latitude, longitude: coords.longitude, accuracy: 'exact' });
           status.textContent = '✓ Exact pin saved (address lookup was unavailable)';
         }
-        finally { detect.disabled = false; detect.textContent = '◎ Detect my location'; }
-      }, () => { status.textContent = 'Location access was not available. Search an address instead.'; detect.disabled = false; detect.textContent = '◎ Detect my location'; }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+        finally { detect.disabled = false; detect.textContent = detectLabel; }
+      }, () => { status.textContent = 'Location access was not available. Search an address instead.'; detect.disabled = false; detect.textContent = detectLabel; }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
     });
     document.addEventListener('click', (event) => { if (!picker.contains(event.target)) results.hidden = true; });
   });
