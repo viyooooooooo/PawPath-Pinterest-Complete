@@ -79,4 +79,6 @@ Existing PostgreSQL data is preserved. New columns are added automatically when 
 - The help-offer locality now has the same searchable pin and detect-location controls used elsewhere.
 - The additional offer explanation is optional and no longer blocks submission.
 - Complete Explore carousel headlines now use the same bold, high-contrast treatment as the animal name.
+- “Open selected pin” now stays inside PawPath, centres the PawPath Map on the saved listing coordinates and opens the matching animal marker.
+- Last-seen wording now states clearly: “The animal is not with the lister. This is where it was last seen.”
 

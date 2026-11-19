@@ -21,6 +21,10 @@
     return;
   }
   const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+  const pageQuery = new URLSearchParams(window.location.search);
+  const requestedFocus = pageQuery.get('focus');
+  const requestedLatitude = Number(pageQuery.get('lat'));
+  const requestedLongitude = Number(pageQuery.get('lng'));
   const dataPromise = fetch('/api/map-data').then((response) => {
     if (!response.ok) throw new Error('Map data could not be loaded.');
     return response.json();
@@ -160,6 +164,15 @@
           if (!feature) return;
           new maplibregl.Popup({ offset: 14, maxWidth: '270px' }).setLngLat(feature.geometry.coordinates).setHTML(pointPopup(feature.properties)).addTo(map);
         });
+        const focusedPoint = state.points.find((point) => point.id === requestedFocus);
+        const hasRequestedCoordinates = Number.isFinite(requestedLatitude) && Number.isFinite(requestedLongitude);
+        if (focusedPoint || hasRequestedCoordinates) {
+          const longitude = focusedPoint ? focusedPoint.longitude : requestedLongitude;
+          const latitude = focusedPoint ? focusedPoint.latitude : requestedLatitude;
+          map.flyTo({ center: [longitude, latitude], zoom: 14.5, duration: 900 });
+          if (focusedPoint) new maplibregl.Popup({ offset: 18, maxWidth: '270px' }).setLngLat([longitude, latitude]).setHTML(pointPopup(focusedPoint)).addTo(map);
+          else new maplibregl.Marker({ color: '#1f674d' }).setLngLat([longitude, latitude]).setPopup(new maplibregl.Popup().setText('Selected PawPath listing location')).addTo(map).togglePopup();
+        }
       }
       render(false);
       document.querySelectorAll('[data-map-loading]').forEach((node) => node.classList.add('is-hidden'));
