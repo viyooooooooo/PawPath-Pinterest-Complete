@@ -1,5 +1,4 @@
 <%- include('partials/header') %>
-<% let vaccinationRows = []; try { vaccinationRows = JSON.parse(animal.vaccinations_done || '[]'); } catch (error) {} if (!Array.isArray(vaccinationRows) || !vaccinationRows.length) vaccinationRows = [{name:'',date:''}]; %>
 <section class="form-page wide-form">
   <div class="form-intro">
     <span class="kicker">FAST, KIND LISTING</span>
@@ -13,10 +12,10 @@
       <h2>Photo <small class="optional-label">Optional</small></h2>
       <p class="form-note">A clear photo helps people recognise the animal. Choose one option—your photo stays with this listing after refresh.</p>
       <div class="photo-picker">
-        <button class="photo-choice photo-choice-primary" id="open-camera" type="button">Take Photo
+        <label class="photo-choice photo-choice-primary">Take Photo
+          <input id="take-photo" name="photo" type="file" accept="image/*" capture="environment">
           <span>Open camera</span>
-        </button>
-        <input class="camera-file-fallback" id="take-photo" name="photo" type="file" accept="image/*" capture="environment">
+        </label>
         <label class="photo-choice">Choose from Gallery
           <input id="gallery-photo" name="photo" type="file" accept="image/*">
           <span>Choose a photo or file</span>
@@ -28,23 +27,15 @@
         <button class="text-button danger-button" id="remove-photo" type="button">Remove photo</button>
       </div>
       <input id="remove-photo-input" type="hidden" name="remove_photo" value="">
-      <div class="camera-modal" id="camera-modal" hidden>
-        <div class="camera-panel" role="dialog" aria-modal="true" aria-label="Take an animal photo">
-          <video id="camera-video" autoplay playsinline muted></video>
-          <canvas id="camera-canvas" hidden></canvas>
-          <p>Position the animal clearly, then capture the photo.</p>
-          <div class="camera-actions"><button class="button" id="capture-photo" type="button">Capture photo</button><button class="button button-soft" id="close-camera" type="button">Cancel</button></div>
-        </div>
-      </div>
     </div>
 
     <div class="form-section">
       <h2>The essentials</h2>
       <div class="form-grid">
         <label>Animal's name <span class="required-mark">Required</span><input name="name" required value="<%= animal.name || '' %>" placeholder="Unknown is completely okay"></label>
-        <div class="location-field" data-location-picker><label>Exact location <span class="required-mark">Required</span><input name="locality" autocomplete="off" required value="<%= animal.locality || '' %>" placeholder="Search a road, landmark or neighbourhood"><input type="hidden" name="latitude" value="<%= animal.latitude || '' %>"><input type="hidden" name="longitude" value="<%= animal.longitude || '' %>"><input type="hidden" name="location_accuracy" value="<%= animal.location_accuracy || '' %>"></label><button class="detect-location" type="button" data-detect-location>◎ Detect my location</button><div class="location-suggestions" data-location-results hidden></div><small data-location-status><%= animal.latitude ? '✓ Exact map pin saved' : 'Choose a suggested address or detect your location.' %></small></div>
-        <label>Listing type <select name="category" id="listing-category"><option <%= animal.category === 'Up for Adoption' ? 'selected' : '' %>>Up for Adoption</option><option <%= animal.category === 'Urgent Foster Needed' ? 'selected' : '' %>>Urgent Foster Needed</option><option <%= animal.category === 'Medical / Rescue SOS' ? 'selected' : '' %>>Medical / Rescue SOS</option><option <%= animal.category === 'Community Feeder Spot' ? 'selected' : '' %>>Community Feeder Spot</option></select></label>
-        <label>Urgency <select name="urgency" id="listing-urgency"><option <%= animal.urgency === 'Normal' ? 'selected' : '' %>>Normal</option><option <%= animal.urgency === 'Needs Help Today' ? 'selected' : '' %>>Needs Help Today</option><option <%= animal.urgency === 'Critical' ? 'selected' : '' %>>Critical</option></select></label>
+        <label>Location <span class="required-mark">Required</span><input name="locality" required value="<%= animal.locality || '' %>" placeholder="Area, landmark or neighbourhood"></label>
+        <label>Listing type <select name="category"><option <%= animal.category === 'Up for Adoption' ? 'selected' : '' %>>Up for Adoption</option><option <%= animal.category === 'Urgent Foster Needed' ? 'selected' : '' %>>Urgent Foster Needed</option><option <%= animal.category === 'Community Feeder Spot' ? 'selected' : '' %>>Community Feeder Spot</option></select></label>
+        <label>Urgency <select name="urgency"><option <%= animal.urgency === 'Normal' ? 'selected' : '' %>>Normal</option><option <%= animal.urgency === 'Needs Help Today' ? 'selected' : '' %>>Needs Help Today</option><option <%= animal.urgency === 'Critical' ? 'selected' : '' %>>Critical</option></select></label>
         <input type="hidden" name="status" value="<%= animal.status || 'Reported' %>">
       </div>
     </div>
@@ -52,24 +43,21 @@
     <details class="optional-details" open>
       <summary>Animal details <span>All optional</span></summary>
       <div class="form-grid optional-grid">
-        <label>Species <select name="species" id="species-select"><option value="">Unknown</option><option <%= animal.species === 'Dog' ? 'selected' : '' %>>Dog</option><option <%= animal.species === 'Cat' ? 'selected' : '' %>>Cat</option><option <%= animal.species === 'Other' ? 'selected' : '' %>>Other</option></select></label>
-        <label id="species-other-field" <%= animal.species === 'Other' ? '' : 'hidden' %>>Which animal? <span class="optional-label">Optional</span><input name="species_other" value="<%= animal.species_other || '' %>" placeholder="e.g. pigeon, cow, rabbit"></label>
+        <label>Species <select name="species"><option value="">Unknown</option><option <%= animal.species === 'Dog' ? 'selected' : '' %>>Dog</option><option <%= animal.species === 'Cat' ? 'selected' : '' %>>Cat</option><option <%= animal.species === 'Other' ? 'selected' : '' %>>Other</option></select></label>
         <label>Age <input name="age" value="<%= animal.age && animal.age !== 'Unknown' ? animal.age : '' %>" placeholder="e.g. approx. 2 years"></label>
         <label>Breed <input name="colour" value="<%= animal.colour && animal.colour !== 'Not added' ? animal.colour : '' %>" placeholder="e.g. Indie / mixed breed"></label>
         <label>Gender <select name="gender"><option value="">Unknown</option><option <%= animal.gender === 'Female' ? 'selected' : '' %>>Female</option><option <%= animal.gender === 'Male' ? 'selected' : '' %>>Male</option></select></label>
         <label>Size <select name="size"><option value="">Unknown</option><option <%= animal.size === 'Small' ? 'selected' : '' %>>Small</option><option <%= animal.size === 'Medium' ? 'selected' : '' %>>Medium</option><option <%= animal.size === 'Large' ? 'selected' : '' %>>Large</option></select></label>
         <label>Temperament <input name="temperament" value="<%= animal.temperament && animal.temperament !== 'Not added' ? animal.temperament : '' %>" placeholder="e.g. calm, shy, friendly"></label>
-        <label>Vaccination status <select name="vaccinated" id="vaccination-status"><option value="">Unknown</option><option <%= animal.vaccinated === 'Yes' ? 'selected' : '' %>>Yes</option><option <%= animal.vaccinated === 'Partially' ? 'selected' : '' %>>Partially</option><option <%= animal.vaccinated === 'No' ? 'selected' : '' %>>No</option></select></label>
+        <label>Vaccination status <select name="vaccinated"><option value="">Unknown</option><option <%= animal.vaccinated === 'Yes' ? 'selected' : '' %>>Yes</option><option <%= animal.vaccinated === 'No' ? 'selected' : '' %>>No</option></select></label>
         <label>Sterilisation status <select name="sterilised"><option value="">Unknown</option><option <%= animal.sterilised === 'Yes' ? 'selected' : '' %>>Yes</option><option <%= animal.sterilised === 'No' ? 'selected' : '' %>>No</option></select></label>
       </div>
-      <div class="vaccination-editor" id="vaccination-editor" <%= ['Yes','Partially'].includes(animal.vaccinated) ? '' : 'hidden' %>><div><h3>Vaccinations already given <span class="optional-label">Optional</span></h3><p>Add each known vaccination and date. Approximate dates are okay.</p></div><div id="vaccination-rows"><% vaccinationRows.forEach(row => { %><div class="vaccination-row"><input name="vaccination_name" value="<%= row.name || '' %>" placeholder="Vaccination name"><input name="vaccination_date" type="date" value="<%= row.date || '' %>"><button type="button" class="remove-vaccination" aria-label="Remove vaccination">×</button></div><% }) %></div><button type="button" class="add-vaccination" id="add-vaccination">+ Add another vaccination</button></div>
     </details>
 
     <details class="optional-details">
       <summary>Care notes and contact <span>All optional</span></summary>
       <div class="form-grid optional-grid">
         <label class="full-width">Medical condition or care note<textarea name="medical_notes" rows="3" placeholder="Injury, medication, recent treatment or anything helpers should know."><%= animal.medical_notes || '' %></textarea></label>
-        <label class="full-width">Vaccinations still required <span class="optional-label">Optional</span><textarea name="vaccinations_required" rows="2" placeholder="e.g. Anti-rabies booster, DHPP first dose"><%= animal.vaccinations_required || '' %></textarea></label>
         <label class="full-width">Description<textarea name="description" rows="4" placeholder="What happened and what support would help?"><%= animal.description && animal.description !== 'No description added yet.' ? animal.description : '' %></textarea></label>
         <label class="full-width">Contact details or extra information<textarea name="contact_details" rows="2" placeholder="Optional—share only a safe way for people to reach you."><%= animal.contact_details || '' %></textarea></label>
       </div>
@@ -86,42 +74,6 @@
     const placeholder = document.getElementById('photo-placeholder');
     const remove = document.getElementById('remove-photo');
     const removeInput = document.getElementById('remove-photo-input');
-    const openCamera = document.getElementById('open-camera');
-    const modal = document.getElementById('camera-modal');
-    const video = document.getElementById('camera-video');
-    const canvas = document.getElementById('camera-canvas');
-    const capture = document.getElementById('capture-photo');
-    const closeCamera = document.getElementById('close-camera');
-    let cameraStream;
-    const stopCamera = () => {
-      cameraStream?.getTracks().forEach((track) => track.stop());
-      cameraStream = null; video.srcObject = null; modal.hidden = true;
-    };
-    openCamera.addEventListener('click', async () => {
-      if (!navigator.mediaDevices?.getUserMedia) { inputs[0].click(); return; }
-      try {
-        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-        video.srcObject = cameraStream; modal.hidden = false; await video.play();
-      } catch (error) { stopCamera(); inputs[0].click(); }
-    });
-    capture.addEventListener('click', () => {
-      if (!video.videoWidth || !video.videoHeight) return;
-      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        if (typeof DataTransfer !== 'function') { stopCamera(); inputs[0].click(); return; }
-        const transfer = new DataTransfer();
-        transfer.items.add(new File([blob], `pawpath-camera-${Date.now()}.jpg`, { type: 'image/jpeg' }));
-        inputs[0].files = transfer.files;
-        inputs[0].dispatchEvent(new Event('change', { bubbles: true }));
-        stopCamera();
-      }, 'image/jpeg', 0.9);
-    });
-    closeCamera.addEventListener('click', stopCamera);
-    modal.addEventListener('click', (event) => { if (event.target === modal) stopCamera(); });
-    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !modal.hidden) stopCamera(); });
-    window.addEventListener('pagehide', stopCamera);
     inputs.forEach((input, index) => input.addEventListener('change', () => {
       const file = input.files && input.files[0];
       if (!file) return;
@@ -130,21 +82,6 @@
     }));
     remove.addEventListener('click', () => { inputs.forEach((input) => { input.value = ''; }); preview.removeAttribute('src'); wrap.classList.remove('has-photo'); removeInput.value = 'on'; });
     if (!preview.getAttribute('src')) wrap.classList.remove('has-photo');
-    const category = document.getElementById('listing-category');
-    const urgency = document.getElementById('listing-urgency');
-    category.addEventListener('change', () => { if (category.value === 'Medical / Rescue SOS' && urgency.value === 'Normal') urgency.value = 'Needs Help Today'; });
-    const species = document.getElementById('species-select');
-    const speciesOther = document.getElementById('species-other-field');
-    const toggleSpecies = () => { speciesOther.hidden = species.value !== 'Other'; };
-    species.addEventListener('change', toggleSpecies); toggleSpecies();
-    const vaccinationStatus = document.getElementById('vaccination-status');
-    const vaccinationEditor = document.getElementById('vaccination-editor');
-    const toggleVaccinations = () => { vaccinationEditor.hidden = !['Yes','Partially'].includes(vaccinationStatus.value); };
-    vaccinationStatus.addEventListener('change', toggleVaccinations); toggleVaccinations();
-    const rows = document.getElementById('vaccination-rows');
-    document.getElementById('add-vaccination').addEventListener('click', () => { const row = document.createElement('div'); row.className='vaccination-row'; row.innerHTML='<input name="vaccination_name" placeholder="Vaccination name"><input name="vaccination_date" type="date"><button type="button" class="remove-vaccination" aria-label="Remove vaccination">×</button>'; rows.appendChild(row); });
-    rows.addEventListener('click', (event) => { if (event.target.closest('.remove-vaccination')) { const allRows=rows.querySelectorAll('.vaccination-row'); if(allRows.length>1) event.target.closest('.vaccination-row').remove(); else event.target.closest('.vaccination-row').querySelectorAll('input').forEach(input=>input.value=''); } });
   })();
 </script>
-<script src="/js/location-picker.js"></script>
 <%- include('partials/footer') %>
