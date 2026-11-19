@@ -1,8 +1,26 @@
 (() => {
-  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const reveals=document.querySelectorAll('[data-tail-reveal]');
-  if(reduced) reveals.forEach(node=>node.classList.add('is-visible')); else {const observer=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting){entry.target.classList.add('is-visible');observer.unobserve(entry.target)}}),{threshold:.12});reveals.forEach(node=>observer.observe(node))}
-  const deck=document.querySelector('[data-tail-deck]');
-  if(deck){const cards=[...deck.querySelectorAll('[data-tail-card]')],picks=[...deck.querySelectorAll('[data-tail-pick]')];let active=0,locked=false;const show=index=>{active=Math.max(0,Math.min(cards.length-1,index));cards.forEach((card,i)=>{card.classList.toggle('is-active',i===active);card.setAttribute('aria-hidden',String(i!==active))});picks.forEach((pick,i)=>pick.classList.toggle('is-active',i===active));picks[active]?.scrollIntoView({behavior:reduced?'auto':'smooth',block:'nearest',inline:'center'})};picks.forEach((pick,i)=>pick.addEventListener('click',()=>show(i)));deck.addEventListener('wheel',event=>{if(Math.abs(event.deltaY)<8||locked)return;const next=active+(event.deltaY>0?1:-1);if(next<0||next>=cards.length)return;event.preventDefault();show(next);locked=true;setTimeout(()=>locked=false,520)},{passive:false});deck.addEventListener('keydown',event=>{if(['ArrowRight','ArrowDown'].includes(event.key))show(active+1);if(['ArrowLeft','ArrowUp'].includes(event.key))show(active-1)})}
-  const progress=document.querySelector('.tails-progress span'),stage=document.querySelector('[data-impact-collage]'),number=document.querySelector('.photo-number'),photos=[...document.querySelectorAll('.collage-photo')];let queued=false;const update=()=>{queued=false;const max=document.documentElement.scrollHeight-innerHeight;if(progress)progress.style.transform=`scaleX(${max>0?scrollY/max:0})`;if(reduced||!stage)return;const rect=stage.getBoundingClientRect(),p=Math.max(0,Math.min(1,(innerHeight-rect.top)/(rect.height+innerHeight)));if(number)number.style.transform=`scale(${.82+p*.25})`;photos.forEach((photo,i)=>photo.style.translate=`0 ${(p-.5)*(i%2?90:-90)}px`)};addEventListener('scroll',()=>{if(!queued){queued=true;requestAnimationFrame(update)}},{passive:true});update();
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reveals = document.querySelectorAll('[data-tail-reveal]');
+  if (reduced) reveals.forEach((node) => node.classList.add('is-visible'));
+  else {
+    const observer = new IntersectionObserver((entries) => entries.forEach((entry) => {
+      if (entry.isIntersecting) { entry.target.classList.add('is-visible'); observer.unobserve(entry.target); }
+    }), { threshold: .12 });
+    reveals.forEach((node) => observer.observe(node));
+  }
+
+  const deck = document.querySelector('[data-tail-deck]');
+  if (!deck) return;
+  const cards = [...deck.querySelectorAll('[data-tail-card]')];
+  const activate = (card) => cards.forEach((item) => item.classList.toggle('is-active', item === card));
+  cards.forEach((card) => {
+    card.addEventListener('mouseenter', () => activate(card));
+    card.addEventListener('focus', () => activate(card));
+    card.addEventListener('click', () => activate(card));
+    card.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+      const index = cards.indexOf(card) + (event.key === 'ArrowRight' ? 1 : -1);
+      cards[Math.max(0, Math.min(cards.length - 1, index))]?.focus();
+    });
+  });
 })();

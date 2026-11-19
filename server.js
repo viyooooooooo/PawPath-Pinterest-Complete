@@ -59,6 +59,7 @@ const networkDirectoryCte = `WITH network AS (
     CASE WHEN users.show_phone=1 THEN COALESCE(users.phone, '') ELSE '' END AS phone_primary,
     '' AS phone_secondary,
     CASE WHEN users.show_public_email=1 THEN COALESCE(users.public_email, '') ELSE '' END AS public_email,
+    users.show_full_address AS show_full_address,
     CASE WHEN users.show_website=1 THEN COALESCE(users.website, '') ELSE '' END AS website,
     CASE WHEN users.show_instagram=1 THEN COALESCE(users.instagram_handle, '') ELSE '' END AS instagram_handle,
     '' AS source_url,
@@ -91,6 +92,7 @@ const networkDirectoryCte = `WITH network AS (
     COALESCE(directory_entries.phone_primary, '') AS phone_primary,
     COALESCE(directory_entries.phone_secondary, '') AS phone_secondary,
     COALESCE(directory_entries.email, '') AS public_email,
+    1 AS show_full_address,
     COALESCE(directory_entries.website, '') AS website,
     '' AS instagram_handle,
     COALESCE(directory_entries.source_url, '') AS source_url,
@@ -112,6 +114,12 @@ function safeWebsite(value) {
     const url = new URL(text.startsWith('http') ? text : `https://${text}`);
     return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
   } catch (error) { return ''; }
+}
+function approximateLocation(value) {
+  const parts = String(value || '').split(',').map((part) => part.trim()).filter(Boolean)
+    .filter((part) => !/^india$/i.test(part) && !/^\d{5,6}$/.test(part));
+  if (parts.length <= 2) return parts.join(', ');
+  return parts.slice(-2).join(', ');
 }
 function proofFromRequest(req, existing = '') {
   if (!req.file) return existing;
@@ -386,7 +394,7 @@ app.get('/api/map-data', async (req, res, next) => {
   try {
     const animals = await all(`SELECT id,name,species,species_other,locality,urgency,category,status,photo_url,latitude,longitude,location_accuracy
       FROM animals WHERE status NOT IN ('Adopted','Resolved') ORDER BY created_at DESC`);
-    const members = await all(`SELECT id,username AS name,entity_type AS category,locality AS location,verification_status,latitude,longitude,location_accuracy
+    const members = await all(`SELECT id,username AS name,entity_type AS category,locality AS location,show_full_address,verification_status,latitude,longitude,location_accuracy
       FROM users ORDER BY username`);
     const directory = await all(`SELECT id,name,category,subtype,city,state,address,trust_status,listing_readiness,latitude,longitude,location_accuracy
       FROM directory_entries ORDER BY category,name`);
@@ -402,14 +410,15 @@ app.get('/api/map-data', async (req, res, next) => {
       };
     });
     const memberPoints = members.map((member) => {
-      const fallback = coordinatesForPlace(member.location, '', `member:${member.id}`);
+      const visibleLocation = Number(member.show_full_address) === 1 ? member.location : approximateLocation(member.location);
+      const fallback = coordinatesForPlace(visibleLocation, '', `member-public:${member.id}`);
       const group = member.category === 'Veterinarian / vet clinic' ? 'vets' : member.category === 'Shelter / NGO / rescue organisation' ? 'organisations' : 'volunteers';
       return {
         id: `member-${member.id}`, kind: 'network', recordId: member.id, name: member.name,
-        category: group, subtype: member.category, location: member.location,
+        category: group, subtype: member.category, location: visibleLocation || 'Location kept private',
         trust: member.verification_status === 'Verified' ? 'PawPath verified' : member.verification_status === 'Under review' ? 'Verification under review' : 'Unverified member',
-        latitude: Number(member.latitude ?? fallback.latitude), longitude: Number(member.longitude ?? fallback.longitude),
-        locationAccuracy: member.location_accuracy || fallback.location_accuracy, url: `/profiles/${member.id}`
+        latitude: Number(Number(member.show_full_address) === 1 && member.latitude != null ? member.latitude : fallback.latitude), longitude: Number(Number(member.show_full_address) === 1 && member.longitude != null ? member.longitude : fallback.longitude),
+        locationAccuracy: Number(member.show_full_address) === 1 ? (member.location_accuracy || fallback.location_accuracy) : 'approximate', url: `/profiles/${member.id}`
       };
     });
     const directoryPoints = directory.map((entry) => {
@@ -460,6 +469,9 @@ app.get('/profiles', async (req, res, next) => {
         CASE trust_status WHEN 'Verified' THEN 1 WHEN 'source_verified' THEN 2 WHEN 'official_source' THEN 3 WHEN 'awbi_recognised' THEN 4 ELSE 5 END,
         name
       LIMIT ? OFFSET ?`, [...params, NETWORK_PAGE_SIZE, (page - 1) * NETWORK_PAGE_SIZE]);
+    profiles.forEach((profile) => {
+      if (profile.source_type === 'user' && Number(profile.show_full_address) !== 1) profile.location = approximateLocation(profile.location);
+    });
     const states = await all("SELECT DISTINCT state FROM directory_entries WHERE COALESCE(state,'')!='' ORDER BY state");
     const groupCounts = await all(`${networkDirectoryCte} SELECT category, COUNT(*) AS count FROM network GROUP BY category`);
     const counts = Object.fromEntries(groupCounts.map((item) => [item.category, Number(item.count)]));
@@ -489,9 +501,10 @@ app.get('/directory/:id', async (req, res, next) => {
 
 app.get('/profiles/:id', async (req, res, next) => {
   try {
-    const profile = await get('SELECT id, username, role, bio, locality, profile_photo, verification_status, verified_at, created_at, entity_type, organisation_name, phone, show_phone, public_email, show_public_email, instagram_handle, show_instagram, website, show_website FROM users WHERE id=?', [req.params.id]);
+    const profile = await get('SELECT id, username, role, bio, locality, show_full_address, profile_photo, verification_status, verified_at, created_at, entity_type, organisation_name, phone, show_phone, public_email, show_public_email, instagram_handle, show_instagram, website, show_website FROM users WHERE id=?', [req.params.id]);
     if (!profile) return res.status(404).render('error', { title: 'Profile not found | PawPath', message: 'That community profile does not exist.' });
     if (req.session.user && profile.id === req.session.user.id) return res.redirect('/dashboard');
+    profile.public_location = Number(profile.show_full_address) === 1 ? profile.locality : approximateLocation(profile.locality);
     const listings = await all("SELECT * FROM animals WHERE user_id=? ORDER BY CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, created_at DESC", [profile.id]);
     const ownListings = req.session.user ? await all("SELECT * FROM animals WHERE user_id=? AND status NOT IN ('Adopted','Resolved') ORDER BY created_at DESC", [req.session.user.id]) : [];
     const listingMatches = ownListings.map((listing) => ({ id: listing.id, score: listingMatchScore(listing, profile) }));
@@ -861,8 +874,8 @@ app.post('/signup', proofUpload.single('verification_document'), async (req, res
     const hash = await bcrypt.hash(password, 10);
     const memberGeo = requestCoordinates(req.body, String(locality || '').trim(), `member:${email}`);
     const isVet = entity_type === 'Veterinarian / vet clinic';
-    const result = await run(`INSERT INTO users (username,email,password_hash,role,locality,entity_type,organisation_name,phone,show_phone,public_email,show_public_email,instagram_handle,show_instagram,website,show_website,verification_document,vet_registration_number,vet_council_name,vet_certificate_status,vet_certificate_provider,latitude,longitude,location_accuracy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
-      username.trim(), email.trim().toLowerCase(), hash, role || 'Community member', String(locality || '').trim(), entity_type,
+    const result = await run(`INSERT INTO users (username,email,password_hash,role,locality,show_full_address,entity_type,organisation_name,phone,show_phone,public_email,show_public_email,instagram_handle,show_instagram,website,show_website,verification_document,vet_registration_number,vet_council_name,vet_certificate_status,vet_certificate_provider,latitude,longitude,location_accuracy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      username.trim(), email.trim().toLowerCase(), hash, role || 'Community member', String(locality || '').trim(), req.body.show_full_address === 'on' ? 1 : 0, entity_type,
       String(organisation_name || '').trim(), String(phone || '').replace(/\s/g, ''), req.body.show_phone === 'on' ? 1 : 0,
       String(public_email || '').trim().toLowerCase(), req.body.show_public_email === 'on' ? 1 : 0,
       String(instagram_handle || '').trim().replace(/^@/, ''), req.body.show_instagram === 'on' ? 1 : 0,

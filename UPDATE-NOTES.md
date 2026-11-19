@@ -47,3 +47,13 @@ Existing PostgreSQL data is preserved. New columns are added automatically when 
 - Removed bundled `@pawpath.local` demo people and stopped creating fictional accounts, listings, or Happy Tail stories. User-created records and supplied public-directory records remain intact.
 - Added source-attributed supplemental organisation contact import support through `data/imports/organisation_contacts.csv`. The supplied AWBI file contains no phone/email fields, so missing contacts are not fabricated.
 
+# Privacy, colour and Happy Tails interaction update
+
+- New accounts now choose separately whether their complete address is public. The default is private; cards, profile details and map data use only a broader city/region unless the member opts in.
+- Phone and public-email consent continue to control whether Call and Email appear beside View details for new member profiles.
+- Removed the small green eyebrow/kicker labels throughout the interface.
+- Recoloured the Explore impact panel to the cream/green PawPath palette while preserving its motion system.
+- Rebuilt Happy Tails around a stronger featured-story opening, a solid-green impact number with four green graphic tiles, and an always-visible card stack.
+- Happy Tails cards now respond to hover, keyboard focus and tap. Wheel/scroll-driven card switching and scroll-linked collage movement were removed.
+- The supplied AWBI SQL is unchanged because it contains no contact fields. Current bundled coverage is 26/26 volunteers with phone numbers and 34/34 veterinary records with phone numbers; organisation contacts remain empty until source-backed data is supplied.
+
