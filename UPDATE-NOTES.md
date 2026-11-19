@@ -69,4 +69,5 @@ Existing PostgreSQL data is preserved. New columns are added automatically when 
 - The Explore network orbit now includes a PawPath paw inside a small earth-style globe.
 - The watercolor paw artwork is now clearly visible behind the Explore rescue carousel.
 - Each featured dog receives a different editorial headline instead of repeating “needs a safe next step.”
+- Added a dedicated, non-transitioning paw-pattern layer inside the first Explore carousel so the artwork always remains behind every photo and text slide.
 

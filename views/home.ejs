@@ -4,6 +4,7 @@
 <div class="scroll-progress" aria-hidden="true"><span></span></div>
 
 <section class="rescue-carousel" data-rescue-carousel aria-label="Featured rescue dogs">
+  <div class="rescue-carousel-pattern" aria-hidden="true"></div>
   <div class="rescue-slides">
     <% featuredRescues.forEach((animal, index) => { %>
       <article class="rescue-slide <%= index === 0 ? 'is-active' : '' %>" data-rescue-slide aria-hidden="<%= index === 0 ? 'false' : 'true' %>" style="--slide-photo:url('<%= animal.photo_url %>')">

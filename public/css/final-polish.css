@@ -15,8 +15,10 @@ html,body{max-width:100%;overflow-x:clip}
 
 /* Explore: the supplied watercolor paw artwork replaces the black photo wash. */
 .explore-experience .rescue-carousel{background-color:#f6f3e9;background-image:url('/images/explore-green-paws.png');background-position:center;background-size:cover;background-repeat:no-repeat;color:var(--ink)}
+.explore-experience .rescue-carousel-pattern{position:absolute;inset:0;z-index:0;background:#f6f3e9 url('/images/explore-green-paws.png') center/cover no-repeat;pointer-events:none}
+.explore-experience .rescue-slides{z-index:1}
 .explore-experience .rescue-slide-backdrop{display:none}
-.explore-experience .rescue-slide-wash{z-index:1;background:linear-gradient(90deg,rgba(247,243,233,.88) 0%,rgba(247,243,233,.79) 37%,rgba(247,243,233,.26) 57%,rgba(247,243,233,.04) 78%),linear-gradient(0deg,rgba(247,243,233,.42),transparent 54%)}
+.explore-experience .rescue-slide-wash{z-index:1;background:linear-gradient(90deg,rgba(247,243,233,.78) 0%,rgba(247,243,233,.66) 37%,rgba(247,243,233,.18) 57%,rgba(247,243,233,.02) 78%),linear-gradient(0deg,rgba(247,243,233,.30),transparent 54%)}
 .explore-experience .rescue-slide-photo-frame{inset:5% 3.5% 5% 46%;border:10px solid rgba(255,255,255,.9);background:rgba(223,238,228,.86);box-shadow:0 30px 80px rgba(31,103,77,.22);overflow:hidden;contain:paint}
 .explore-experience .rescue-slide-image{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;object-position:center!important;translate:none!important;transform:none!important;background:rgba(223,238,228,.55)}
 .explore-experience .rescue-slide.is-active .rescue-slide-image{transform:none!important}
