@@ -12,10 +12,10 @@
       <h2>Photo <small class="optional-label">Optional</small></h2>
       <p class="form-note">A clear photo helps people recognise the animal. Choose one option—your photo stays with this listing after refresh.</p>
       <div class="photo-picker">
-        <label class="photo-choice photo-choice-primary">Take Photo
-          <input id="take-photo" name="photo" type="file" accept="image/*" capture="environment">
+        <button class="photo-choice photo-choice-primary" id="open-camera" type="button">Take Photo
           <span>Open camera</span>
-        </label>
+        </button>
+        <input class="camera-file-fallback" id="take-photo" name="photo" type="file" accept="image/*" capture="environment">
         <label class="photo-choice">Choose from Gallery
           <input id="gallery-photo" name="photo" type="file" accept="image/*">
           <span>Choose a photo or file</span>
@@ -27,6 +27,14 @@
         <button class="text-button danger-button" id="remove-photo" type="button">Remove photo</button>
       </div>
       <input id="remove-photo-input" type="hidden" name="remove_photo" value="">
+      <div class="camera-modal" id="camera-modal" hidden>
+        <div class="camera-panel" role="dialog" aria-modal="true" aria-label="Take an animal photo">
+          <video id="camera-video" autoplay playsinline muted></video>
+          <canvas id="camera-canvas" hidden></canvas>
+          <p>Position the animal clearly, then capture the photo.</p>
+          <div class="camera-actions"><button class="button" id="capture-photo" type="button">Capture photo</button><button class="button button-soft" id="close-camera" type="button">Cancel</button></div>
+        </div>
+      </div>
     </div>
 
     <div class="form-section">
@@ -34,8 +42,8 @@
       <div class="form-grid">
         <label>Animal's name <span class="required-mark">Required</span><input name="name" required value="<%= animal.name || '' %>" placeholder="Unknown is completely okay"></label>
         <label>Location <span class="required-mark">Required</span><input name="locality" required value="<%= animal.locality || '' %>" placeholder="Area, landmark or neighbourhood"></label>
-        <label>Listing type <select name="category"><option <%= animal.category === 'Up for Adoption' ? 'selected' : '' %>>Up for Adoption</option><option <%= animal.category === 'Urgent Foster Needed' ? 'selected' : '' %>>Urgent Foster Needed</option><option <%= animal.category === 'Community Feeder Spot' ? 'selected' : '' %>>Community Feeder Spot</option></select></label>
-        <label>Urgency <select name="urgency"><option <%= animal.urgency === 'Normal' ? 'selected' : '' %>>Normal</option><option <%= animal.urgency === 'Needs Help Today' ? 'selected' : '' %>>Needs Help Today</option><option <%= animal.urgency === 'Critical' ? 'selected' : '' %>>Critical</option></select></label>
+        <label>Listing type <select name="category" id="listing-category"><option <%= animal.category === 'Up for Adoption' ? 'selected' : '' %>>Up for Adoption</option><option <%= animal.category === 'Urgent Foster Needed' ? 'selected' : '' %>>Urgent Foster Needed</option><option <%= animal.category === 'Medical / Rescue SOS' ? 'selected' : '' %>>Medical / Rescue SOS</option><option <%= animal.category === 'Community Feeder Spot' ? 'selected' : '' %>>Community Feeder Spot</option></select></label>
+        <label>Urgency <select name="urgency" id="listing-urgency"><option <%= animal.urgency === 'Normal' ? 'selected' : '' %>>Normal</option><option <%= animal.urgency === 'Needs Help Today' ? 'selected' : '' %>>Needs Help Today</option><option <%= animal.urgency === 'Critical' ? 'selected' : '' %>>Critical</option></select></label>
         <input type="hidden" name="status" value="<%= animal.status || 'Reported' %>">
       </div>
     </div>
@@ -74,6 +82,42 @@
     const placeholder = document.getElementById('photo-placeholder');
     const remove = document.getElementById('remove-photo');
     const removeInput = document.getElementById('remove-photo-input');
+    const openCamera = document.getElementById('open-camera');
+    const modal = document.getElementById('camera-modal');
+    const video = document.getElementById('camera-video');
+    const canvas = document.getElementById('camera-canvas');
+    const capture = document.getElementById('capture-photo');
+    const closeCamera = document.getElementById('close-camera');
+    let cameraStream;
+    const stopCamera = () => {
+      cameraStream?.getTracks().forEach((track) => track.stop());
+      cameraStream = null; video.srcObject = null; modal.hidden = true;
+    };
+    openCamera.addEventListener('click', async () => {
+      if (!navigator.mediaDevices?.getUserMedia) { inputs[0].click(); return; }
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+        video.srcObject = cameraStream; modal.hidden = false; await video.play();
+      } catch (error) { stopCamera(); inputs[0].click(); }
+    });
+    capture.addEventListener('click', () => {
+      if (!video.videoWidth || !video.videoHeight) return;
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        if (typeof DataTransfer !== 'function') { stopCamera(); inputs[0].click(); return; }
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([blob], `pawpath-camera-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+        inputs[0].files = transfer.files;
+        inputs[0].dispatchEvent(new Event('change', { bubbles: true }));
+        stopCamera();
+      }, 'image/jpeg', 0.9);
+    });
+    closeCamera.addEventListener('click', stopCamera);
+    modal.addEventListener('click', (event) => { if (event.target === modal) stopCamera(); });
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !modal.hidden) stopCamera(); });
+    window.addEventListener('pagehide', stopCamera);
     inputs.forEach((input, index) => input.addEventListener('change', () => {
       const file = input.files && input.files[0];
       if (!file) return;
@@ -82,6 +126,9 @@
     }));
     remove.addEventListener('click', () => { inputs.forEach((input) => { input.value = ''; }); preview.removeAttribute('src'); wrap.classList.remove('has-photo'); removeInput.value = 'on'; });
     if (!preview.getAttribute('src')) wrap.classList.remove('has-photo');
+    const category = document.getElementById('listing-category');
+    const urgency = document.getElementById('listing-urgency');
+    category.addEventListener('change', () => { if (category.value === 'Medical / Rescue SOS' && urgency.value === 'Normal') urgency.value = 'Needs Help Today'; });
   })();
 </script>
 <%- include('partials/footer') %>

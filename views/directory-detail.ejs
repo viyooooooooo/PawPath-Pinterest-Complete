@@ -1,5 +1,5 @@
 <%- include('partials/header') %>
-<% const trustLabel = entry.trust_status === 'source_verified' ? 'Source checked' : entry.trust_status === 'official_source' ? 'Official source' : entry.listing_readiness === 'service_verified' ? 'Rescue services confirmed' : 'AWBI recognised'; %>
+<% const trustLabel = entry.listing_readiness === 'service_verified' ? 'Rescue services confirmed' : entry.trust_status === 'source_verified' ? 'Source checked' : entry.trust_status === 'official_source' ? 'Official source' : entry.trust_status === 'awbi_recognised' ? 'AWBI recognised' : 'Directory listing'; %>
 <section class="directory-detail-hero">
   <a class="text-link" href="/profiles">← Back to Network</a>
   <div class="directory-detail-heading">

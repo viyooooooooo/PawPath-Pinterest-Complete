@@ -149,11 +149,15 @@ function photoFromRequest(req, existingPhoto = '') {
 function listingValues(body, photoUrl) {
   const locality = String(body.locality || '').trim();
   const coordinates = coordinatesForPlace(locality, '', `listing:${body.name || ''}:${locality}`);
+  const category = body.category || 'Up for Adoption';
+  const urgency = category === 'Medical / Rescue SOS' && (!body.urgency || body.urgency === 'Normal')
+    ? 'Needs Help Today'
+    : body.urgency || 'Normal';
   return [
     String(body.name || '').trim(), body.species || 'Unknown', body.gender || 'Unknown', String(body.age || '').trim() || 'Unknown',
     body.size || 'Unknown', String(body.colour || '').trim() || 'Not added', String(body.temperament || '').trim() || 'Not added',
     body.vaccinated || 'Unknown', body.sterilised || 'Unknown', String(body.medical_notes || '').trim(), locality,
-    body.urgency || 'Normal', body.category || 'Up for Adoption', body.status || 'Reported', photoUrl,
+    urgency, category, body.status || 'Reported', photoUrl,
     String(body.description || '').trim() || 'No description added yet.', String(body.contact_details || '').trim(),
     coordinates.latitude, coordinates.longitude, coordinates.location_accuracy
   ];
@@ -212,8 +216,8 @@ app.get('/api/map-data', async (req, res, next) => {
   try {
     const animals = await all(`SELECT id,name,species,locality,urgency,category,status,photo_url,latitude,longitude,location_accuracy
       FROM animals WHERE status NOT IN ('Adopted','Resolved') ORDER BY created_at DESC`);
-    const members = await all(`SELECT id,username AS name,entity_type AS category,locality AS location,latitude,longitude,location_accuracy
-      FROM users WHERE verification_status='Verified' ORDER BY username`);
+    const members = await all(`SELECT id,username AS name,entity_type AS category,locality AS location,verification_status,latitude,longitude,location_accuracy
+      FROM users ORDER BY username`);
     const directory = await all(`SELECT id,name,category,subtype,city,state,address,trust_status,listing_readiness,latitude,longitude,location_accuracy
       FROM directory_entries ORDER BY category,name`);
 
@@ -232,7 +236,8 @@ app.get('/api/map-data', async (req, res, next) => {
       const group = member.category === 'Veterinarian / vet clinic' ? 'vets' : member.category === 'Shelter / NGO / rescue organisation' ? 'organisations' : 'volunteers';
       return {
         id: `member-${member.id}`, kind: 'network', recordId: member.id, name: member.name,
-        category: group, subtype: member.category, location: member.location, trust: 'PawPath verified',
+        category: group, subtype: member.category, location: member.location,
+        trust: member.verification_status === 'Verified' ? 'PawPath verified' : member.verification_status === 'Under review' ? 'Verification under review' : 'Unverified member',
         latitude: Number(member.latitude ?? fallback.latitude), longitude: Number(member.longitude ?? fallback.longitude),
         locationAccuracy: member.location_accuracy || fallback.location_accuracy, url: `/profiles/${member.id}`
       };
@@ -243,12 +248,12 @@ app.get('/api/map-data', async (req, res, next) => {
       return {
         id: `directory-${entry.id}`, kind: 'network', recordId: entry.id, name: entry.name,
         category: entry.category, subtype: entry.subtype, location,
-        trust: entry.listing_readiness === 'service_verified' ? 'Rescue services confirmed' : entry.trust_status === 'awbi_recognised' ? 'AWBI recognised' : 'Source checked',
+        trust: entry.listing_readiness === 'service_verified' ? 'Rescue services confirmed' : entry.trust_status === 'awbi_recognised' ? 'AWBI recognised' : entry.trust_status === 'source_verified' ? 'Source checked' : entry.trust_status === 'official_source' ? 'Official source' : 'Directory listing',
         latitude: Number(entry.latitude ?? fallback.latitude), longitude: Number(entry.longitude ?? fallback.longitude),
         locationAccuracy: entry.location_accuracy || fallback.location_accuracy, url: `/directory/${entry.id}`
       };
     });
-    res.set('Cache-Control', 'public, max-age=300');
+    res.set('Cache-Control', 'no-store');
     res.json({ generatedAt: new Date().toISOString(), points: [...listingPoints, ...memberPoints, ...directoryPoints] });
   } catch (error) { next(error); }
 });
@@ -325,8 +330,8 @@ app.get('/profiles/:id', async (req, res, next) => {
 app.post('/profiles/:id/chat', requireLogin, async (req, res, next) => {
   try {
     const recipient = await get('SELECT id, username, role, verification_status FROM users WHERE id=?', [req.params.id]);
-    if (!recipient || recipient.id === req.session.user.id || recipient.verification_status !== 'Verified') {
-      flash(req, 'error', 'Choose another verified PawPath member to message.');
+    if (!recipient || recipient.id === req.session.user.id) {
+      flash(req, 'error', 'Choose another PawPath member to message.');
       return res.redirect(`/profiles/${req.params.id}`);
     }
     let listing = null;
@@ -412,7 +417,10 @@ app.get('/animals', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.get('/animals/new', requireLogin, (req, res) => res.render('animal-form', { title: 'Report a Stray | PawPath', animal: {}, action: '/animals', formTitle: 'Create an animal profile', errors: [] }));
+app.get('/animals/new', requireLogin, (req, res) => {
+  const animal = req.query.sos === '1' ? { category: 'Medical / Rescue SOS', urgency: 'Critical', status: 'Reported' } : {};
+  res.render('animal-form', { title: 'Report a Stray | PawPath', animal, action: '/animals', formTitle: req.query.sos === '1' ? 'Post an urgent SOS' : 'Create an animal profile', errors: [] });
+});
 app.post('/animals', requireLogin, upload.single('photo'), async (req, res, next) => {
   const errors = validateAnimal(req.body);
   const uploadedPhoto = photoFromRequest(req);

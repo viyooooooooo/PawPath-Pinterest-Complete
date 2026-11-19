@@ -31,8 +31,51 @@
     if (isSos(point)) return '#d94b3d';
     if (point.kind === 'listing') return '#e6a62f';
     if (point.category === 'vets') return '#2f80c9';
-    if (point.category === 'organisations') return '#247052';
-    return '#6bbf83';
+    if (point.category === 'organisations') return '#7553b8';
+    return '#16857a';
+  }
+  function pointIcon(point) {
+    if (isSos(point)) return 'paw-sos';
+    if (point.kind === 'listing') {
+      if (String(point.subtype).toLowerCase() === 'dog') return 'paw-dog';
+      if (String(point.subtype).toLowerCase() === 'cat') return 'paw-cat';
+      return 'paw-animal';
+    }
+    if (point.category === 'vets') return 'paw-vet';
+    if (point.category === 'organisations') return 'paw-shelter';
+    return 'paw-volunteer';
+  }
+  function addMarkerImages(map) {
+    const markers = {
+      'paw-sos': ['🚨', '#d94b3d'],
+      'paw-dog': ['🐕', '#e6a62f'],
+      'paw-cat': ['🐈', '#e6a62f'],
+      'paw-animal': ['🐾', '#e6a62f'],
+      'paw-vet': ['🩺', '#2f80c9'],
+      'paw-shelter': ['🏠', '#7553b8'],
+      'paw-volunteer': ['🧑', '#16857a']
+    };
+    Object.entries(markers).forEach(([id, [emoji, color]]) => {
+      if (map.hasImage(id)) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = 72; canvas.height = 72;
+      const context = canvas.getContext('2d');
+      context.beginPath(); context.arc(36, 36, 29, 0, Math.PI * 2);
+      context.fillStyle = 'rgba(255,255,255,.96)'; context.fill();
+      context.lineWidth = 7; context.strokeStyle = color; context.stroke();
+      context.font = '34px "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
+      context.textAlign = 'center'; context.textBaseline = 'middle';
+      context.fillText(emoji, 36, 37);
+      map.addImage(id, context.getImageData(0, 0, 72, 72), { pixelRatio: 2 });
+    });
+  }
+  function keepBaseMapReadable(map) {
+    (map.getStyle().layers || []).forEach((layer) => {
+      if (layer.type !== 'line') return;
+      const id = String(layer.id || '').toLowerCase();
+      if (!/(road|highway|motorway|trunk|boundary|border)/.test(id)) return;
+      try { map.setPaintProperty(layer.id, 'line-opacity', /(boundary|border)/.test(id) ? 0.72 : 0.62); } catch (error) { /* Keep an incompatible source layer unchanged. */ }
+    });
   }
   function toGeoJson(points) {
     return {
@@ -40,7 +83,7 @@
       features: points.map((point) => ({
         type: 'Feature', id: point.id,
         geometry: { type: 'Point', coordinates: [point.longitude, point.latitude] },
-        properties: { ...point, color: pointColor(point), sos: isSos(point) ? 1 : 0, photo: point.photo || '' }
+        properties: { ...point, color: pointColor(point), icon: pointIcon(point), sos: isSos(point) ? 1 : 0, photo: point.photo || '' }
       }))
     };
   }
@@ -66,7 +109,7 @@
       container: element,
       style: 'https://tiles.openfreemap.org/styles/bright',
       center: [78.6569, 22.9734], zoom: mini ? 3.35 : 4.25,
-      minZoom: 2.4, maxZoom: 18, attributionControl: !mini,
+      minZoom: 3.15, maxZoom: 18, maxBounds: [[60, 4], [101, 38]], attributionControl: !mini,
       interactive: !mini, fadeDuration: 250, cooperativeGestures: !mini
     });
     if (!mini) map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
@@ -101,24 +144,17 @@
     map.on('load', () => {
       state.loaded = true;
       preferEnglishPlaceLabels(map);
-      map.addSource('pawpath-points', { type: 'geojson', data: toGeoJson(filteredPoints()), cluster: true, clusterMaxZoom: 13, clusterRadius: mini ? 58 : 45 });
-      map.addLayer({ id: 'pawpath-clusters', type: 'circle', source: 'pawpath-points', filter: ['has', 'point_count'], paint: {
-        'circle-color': ['step', ['get', 'point_count'], '#2f7358', 100, '#245c45', 750, '#173d2f'],
-        'circle-radius': ['step', ['get', 'point_count'], 18, 100, 25, 750, 34],
-        'circle-stroke-width': 3, 'circle-stroke-color': 'rgba(255,255,255,.88)', 'circle-opacity': .94
-      }});
-      map.addLayer({ id: 'pawpath-cluster-count', type: 'symbol', source: 'pawpath-points', filter: ['has', 'point_count'], layout: { 'text-field': '{point_count_abbreviated}', 'text-size': 12 }, paint: { 'text-color': '#ffffff' } });
-      map.addLayer({ id: 'pawpath-points', type: 'circle', source: 'pawpath-points', filter: ['!', ['has', 'point_count']], paint: {
-        'circle-color': ['get', 'color'], 'circle-radius': ['case', ['==', ['get', 'sos'], 1], 8.5, 6],
-        'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff', 'circle-opacity': .92
+      keepBaseMapReadable(map);
+      addMarkerImages(map);
+      map.addSource('pawpath-points', { type: 'geojson', data: toGeoJson(filteredPoints()), cluster: false });
+      map.addLayer({ id: 'pawpath-points', type: 'symbol', source: 'pawpath-points', layout: {
+        'icon-image': ['get', 'icon'],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 3.15, 0.72, 8, 0.9, 13, 1.08],
+        'icon-allow-overlap': false,
+        'icon-ignore-placement': false,
+        'icon-padding': 2
       }});
       if (!mini) {
-        map.on('click', 'pawpath-clusters', async (event) => {
-          const feature = map.queryRenderedFeatures(event.point, { layers: ['pawpath-clusters'] })[0];
-          if (!feature) return;
-          const zoom = await map.getSource('pawpath-points').getClusterExpansionZoom(feature.properties.cluster_id);
-          map.easeTo({ center: feature.geometry.coordinates, zoom, duration: 650 });
-        });
         map.on('click', 'pawpath-points', (event) => {
           const feature = event.features?.[0];
           if (!feature) return;

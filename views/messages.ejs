@@ -4,7 +4,7 @@
   <div class="conversation-list">
     <% if (conversations.length) { conversations.forEach(conversation => { %>
       <a class="conversation-row" href="/messages/<%= conversation.id %>"><span class="conversation-avatar"><%= conversation.other_username.charAt(0).toUpperCase() %></span><div><strong><%= conversation.other_username %></strong><p><%= conversation.topic %><% if (conversation.compatibility_score) { %> · <%= conversation.compatibility_score %>% compatibility<% } %></p></div><b>Open chat →</b></a>
-    <% }) } else { %><div class="empty-state"><p>No chats yet.</p><a class="button" href="/profiles">Find verified people</a></div><% } %>
+    <% }) } else { %><div class="empty-state"><p>No chats yet.</p><a class="button" href="/profiles">Find PawPath members</a></div><% } %>
   </div>
 </section>
 <%- include('partials/footer') %>
