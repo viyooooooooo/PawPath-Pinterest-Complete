@@ -14,9 +14,9 @@ html,body{max-width:100%;overflow-x:clip}
 @media(max-width:760px){.approach-card-chat .contact-options{grid-template-columns:1fr}.approach-card.approach-card-chat{padding:18px}.approach-card-chat .approach-form{padding:18px}}
 
 /* Explore: the supplied watercolor paw artwork replaces the black photo wash. */
-.explore-experience .rescue-carousel{background:#f6f3e9 url('/images/explore-green-paws.png') center/cover repeat;color:var(--ink)}
+.explore-experience .rescue-carousel{background-color:#f6f3e9;background-image:url('/images/explore-green-paws.png');background-position:center;background-size:cover;background-repeat:no-repeat;color:var(--ink)}
 .explore-experience .rescue-slide-backdrop{display:none}
-.explore-experience .rescue-slide-wash{z-index:1;background:linear-gradient(90deg,rgba(247,243,233,.98) 0%,rgba(247,243,233,.94) 38%,rgba(247,243,233,.42) 56%,rgba(247,243,233,.08) 76%),linear-gradient(0deg,rgba(247,243,233,.64),transparent 52%)}
+.explore-experience .rescue-slide-wash{z-index:1;background:linear-gradient(90deg,rgba(247,243,233,.88) 0%,rgba(247,243,233,.79) 37%,rgba(247,243,233,.26) 57%,rgba(247,243,233,.04) 78%),linear-gradient(0deg,rgba(247,243,233,.42),transparent 54%)}
 .explore-experience .rescue-slide-photo-frame{inset:5% 3.5% 5% 46%;border:10px solid rgba(255,255,255,.9);background:rgba(223,238,228,.86);box-shadow:0 30px 80px rgba(31,103,77,.22);overflow:hidden;contain:paint}
 .explore-experience .rescue-slide-image{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;object-position:center!important;translate:none!important;transform:none!important;background:rgba(223,238,228,.55)}
 .explore-experience .rescue-slide.is-active .rescue-slide-image{transform:none!important}
@@ -30,7 +30,7 @@ html,body{max-width:100%;overflow-x:clip}
 .explore-experience .scroll-cue i{border-color:rgba(31,103,77,.45)}
 .explore-experience .rescue-carousel-status,.explore-experience .rescue-dots,.explore-experience .rescue-carousel-controls>button{background:rgba(19,35,28,.82);color:#fff}
 @media(max-width:1000px){.explore-experience .rescue-slide-photo-frame{inset:4% 2.5% 4% 40%}.explore-experience .rescue-slide-content{width:48vw}}
-@media(max-width:650px){.explore-experience .rescue-slide-photo-frame{inset:2%;border-width:6px}.explore-experience .rescue-slide-photo-frame::after{content:'';position:absolute;inset:0;background:linear-gradient(0deg,rgba(247,243,233,.97) 0%,rgba(247,243,233,.62) 48%,rgba(247,243,233,.06) 80%);pointer-events:none}.explore-experience .rescue-slide-content{width:88%;bottom:17%}}
+@media(max-width:650px){.explore-experience .rescue-slide-photo-frame{inset:2%;border-width:6px}.explore-experience .rescue-slide-photo-frame::after{content:'';position:absolute;inset:0;background:linear-gradient(0deg,rgba(247,243,233,.92) 0%,rgba(247,243,233,.54) 48%,rgba(247,243,233,.03) 80%);pointer-events:none}.explore-experience .rescue-slide-content{width:88%;bottom:17%}}
 
 /* A small PawPath globe sits in the moving network orbit. */
 .manifesto-orbit::after{display:none}

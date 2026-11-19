@@ -1,5 +1,5 @@
 <%- include('partials/header') %>
-<% const featuredRescues = featured && featured.length ? featured : animals.filter(item => item.species === 'Dog').slice(0, 5); %>
+<% const featuredRescues = featured && featured.length ? featured : animals.filter(item => item.species === 'Dog').slice(0, 5); const rescueMessages = ['needs help today.', 'is waiting for a safe home.', 'deserves a second chance.', 'needs a caring foster family.', 'is ready for a kinder tomorrow.', 'is looking for a forever family.']; %>
 
 <div class="scroll-progress" aria-hidden="true"><span></span></div>
 
@@ -11,7 +11,7 @@
         <div class="rescue-slide-photo-frame"><img class="rescue-slide-image" src="<%= animal.photo_url %>" alt="<%= animal.name %>, a rescue dog in <%= animal.locality %>"></div>
         <div class="rescue-slide-wash"></div>
         <div class="rescue-slide-content">
-          <h1><%= animal.name %><span> needs a safe next step.</span></h1>
+          <h1><%= animal.name %><span> <%= rescueMessages[index % rescueMessages.length] %></span></h1>
           <p><%= animal.description %></p>
           <div class="rescue-slide-meta">
             <span class="<%= animal.urgency === 'Critical' ? 'is-urgent' : '' %>"><%= animal.urgency === 'Critical' ? 'Urgent medical help' : animal.urgency === 'Needs Help Today' ? 'Help needed today' : animal.category %></span>

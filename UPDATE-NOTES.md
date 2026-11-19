@@ -67,4 +67,6 @@ Existing PostgreSQL data is preserved. New columns are added automatically when 
 - The Explore carousel uses the supplied watercolor green-paw artwork instead of the black background.
 - Explore photos use a contained, non-scrolling frame so portrait and landscape uploads remain visible without sliding outside the frame.
 - The Explore network orbit now includes a PawPath paw inside a small earth-style globe.
+- The watercolor paw artwork is now clearly visible behind the Explore rescue carousel.
+- Each featured dog receives a different editorial headline instead of repeating “needs a safe next step.”
 
