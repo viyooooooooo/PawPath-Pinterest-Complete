@@ -18,3 +18,14 @@ This build is ready for the existing Render + GitHub deployment flow.
 - Removed the “Featured rescue” label from the homepage carousel.
 
 Existing PostgreSQL data is preserved. New columns are added automatically when Render starts the app.
+
+## Follow-up build
+
+- Backfills every historically accepted offer so its animal becomes `Adopted` on deploy.
+- Splits Listings into active animals and a green completed section at the absolute bottom.
+- Adds a Happy Tails page with three starter stories and adopter photo/story submissions.
+- Adds a real “Request an update” action that sends a live chat message to the accepted adopter.
+- Makes veterinary registration number, issuing council and certificate compulsory for new vet accounts.
+- Separates veterinary certificate verification from ordinary member-to-vet verification.
+- Adds an admin veterinary credential queue and prevents unverified vets from reviewing members.
+- Reclassifies `vyomika22sahay@gmail.com` as a veterinarian account without falsely marking it verified.

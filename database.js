@@ -101,6 +101,9 @@ async function initialiseDatabase() {
     phone TEXT, show_phone INTEGER NOT NULL DEFAULT 0, public_email TEXT, show_public_email INTEGER NOT NULL DEFAULT 0,
     instagram_handle TEXT, show_instagram INTEGER NOT NULL DEFAULT 0, website TEXT, show_website INTEGER NOT NULL DEFAULT 0,
     verification_document TEXT,
+    vet_registration_number TEXT, vet_council_name TEXT,
+    vet_certificate_status TEXT NOT NULL DEFAULT 'Not submitted', vet_certificate_provider TEXT,
+    vet_certificate_reference TEXT, vet_certificate_notes TEXT,
     latitude REAL, longitude REAL, location_accuracy TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`);
@@ -122,6 +125,12 @@ async function initialiseDatabase() {
   await addColumn('users', 'website TEXT');
   await addColumn('users', 'show_website INTEGER NOT NULL DEFAULT 0');
   await addColumn('users', 'verification_document TEXT');
+  await addColumn('users', 'vet_registration_number TEXT');
+  await addColumn('users', 'vet_council_name TEXT');
+  await addColumn('users', "vet_certificate_status TEXT NOT NULL DEFAULT 'Not submitted'");
+  await addColumn('users', 'vet_certificate_provider TEXT');
+  await addColumn('users', 'vet_certificate_reference TEXT');
+  await addColumn('users', 'vet_certificate_notes TEXT');
   await addColumn('users', 'latitude REAL');
   await addColumn('users', 'longitude REAL');
   await addColumn('users', 'location_accuracy TEXT');
@@ -277,6 +286,29 @@ async function initialiseDatabase() {
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
   await run('CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, dismissed_at, is_read)');
+
+  await run(`CREATE TABLE IF NOT EXISTS happy_tails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    animal_id INTEGER,
+    dog_name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    story_text TEXT NOT NULL,
+    after_photo_url TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (animal_id) REFERENCES animals(id) ON DELETE SET NULL
+  )`);
+
+  // Keep listings accepted before this release consistent with the new
+  // completed-listing layout. This is safe and idempotent on every deploy.
+  await run("UPDATE animals SET status='Adopted' WHERE id IN (SELECT animal_id FROM applications WHERE status='Accepted') AND status NOT IN ('Adopted','Resolved')");
+
+  // Requested account correction: classify this existing member as a vet.
+  // Verification is deliberately not granted until a certificate is reviewed.
+  await run(`UPDATE users SET entity_type='Veterinarian / vet clinic', role='Veterinarian',
+    vet_certificate_status=CASE WHEN COALESCE(verification_document,'')='' THEN 'Not submitted' ELSE 'Under review' END
+    WHERE LOWER(email)='vyomika22sahay@gmail.com'`);
   await allowGeneralConversations();
   // The SQLite compatibility rebuild above can replace the conversations table.
   // Re-assert these columns afterwards so upgrades from every older schema work.
