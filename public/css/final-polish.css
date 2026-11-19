@@ -1,0 +1,61 @@
+/* Final responsive and visual polish. Loaded last so these safety rules win. */
+html,body{max-width:100%;overflow-x:clip}
+
+/* Keep the profile contact and suggestion forms inside their card at every width. */
+.approach-section,.approach-card,.approach-card-chat,.contact-copy,.contact-options,.approach-form,.listing-message-form{min-width:0;max-width:100%;box-sizing:border-box}
+.approach-card.approach-card-chat{grid-template-columns:minmax(240px,.72fr) minmax(0,1.28fr);width:100%;overflow:hidden}
+.approach-card-chat .contact-options{grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+.approach-form label,.approach-form select,.approach-form input,.approach-form textarea,.approach-form button{min-width:0;max-width:100%;width:100%;box-sizing:border-box}
+.approach-form select{display:block;text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
+.approach-form textarea{display:block;resize:vertical}
+.approach-form button{white-space:normal;overflow-wrap:anywhere}
+.match-score{min-width:0;overflow-wrap:anywhere}
+@media(max-width:1100px){.approach-card.approach-card-chat{grid-template-columns:1fr}.approach-card-chat .contact-options{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.approach-card-chat .contact-options{grid-template-columns:1fr}.approach-card.approach-card-chat{padding:18px}.approach-card-chat .approach-form{padding:18px}}
+
+/* Explore: the supplied watercolor paw artwork replaces the black photo wash. */
+.explore-experience .rescue-carousel{background:#f6f3e9 url('/images/explore-green-paws.png') center/cover repeat;color:var(--ink)}
+.explore-experience .rescue-slide-backdrop{display:none}
+.explore-experience .rescue-slide-wash{z-index:1;background:linear-gradient(90deg,rgba(247,243,233,.98) 0%,rgba(247,243,233,.94) 38%,rgba(247,243,233,.42) 56%,rgba(247,243,233,.08) 76%),linear-gradient(0deg,rgba(247,243,233,.64),transparent 52%)}
+.explore-experience .rescue-slide-photo-frame{inset:5% 3.5% 5% 46%;border:10px solid rgba(255,255,255,.9);background:rgba(223,238,228,.86);box-shadow:0 30px 80px rgba(31,103,77,.22);overflow:hidden;contain:paint}
+.explore-experience .rescue-slide-image{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;object-fit:contain!important;object-position:center!important;translate:none!important;transform:none!important;background:rgba(223,238,228,.55)}
+.explore-experience .rescue-slide.is-active .rescue-slide-image{transform:none!important}
+.explore-experience .rescue-slide-content{color:var(--ink)}
+.explore-experience .rescue-slide h1 span{color:rgba(19,35,28,.63)}
+.explore-experience .rescue-slide-content>p{color:#3d5147}
+.explore-experience .rescue-slide-meta span{border-color:rgba(31,103,77,.26);background:rgba(255,255,255,.72);color:var(--ink)}
+.explore-experience .rescue-slide-meta .is-urgent{color:#fff}
+.explore-experience .rescue-text-link{color:var(--ink)}
+.explore-experience .scroll-cue{color:var(--green)}
+.explore-experience .scroll-cue i{border-color:rgba(31,103,77,.45)}
+.explore-experience .rescue-carousel-status,.explore-experience .rescue-dots,.explore-experience .rescue-carousel-controls>button{background:rgba(19,35,28,.82);color:#fff}
+@media(max-width:1000px){.explore-experience .rescue-slide-photo-frame{inset:4% 2.5% 4% 40%}.explore-experience .rescue-slide-content{width:48vw}}
+@media(max-width:650px){.explore-experience .rescue-slide-photo-frame{inset:2%;border-width:6px}.explore-experience .rescue-slide-photo-frame::after{content:'';position:absolute;inset:0;background:linear-gradient(0deg,rgba(247,243,233,.97) 0%,rgba(247,243,233,.62) 48%,rgba(247,243,233,.06) 80%);pointer-events:none}.explore-experience .rescue-slide-content{width:88%;bottom:17%}}
+
+/* A small PawPath globe sits in the moving network orbit. */
+.manifesto-orbit::after{display:none}
+.manifesto-globe{position:absolute;inset:31%;display:grid;place-items:center;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 32% 27%,#6fbd94 0 8%,#2d7b5d 9% 48%,#17503c 75%);box-shadow:0 22px 55px rgba(31,103,77,.2);transform:rotate(-12deg)}
+.manifesto-globe::before,.manifesto-globe::after{content:'';position:absolute;border:1px solid rgba(255,255,255,.38);border-radius:50%}
+.manifesto-globe::before{inset:7% 31%}
+.manifesto-globe::after{inset:31% 7%}
+.manifesto-globe i,.manifesto-globe b{position:absolute;border-radius:55% 35% 52% 40%;background:rgba(204,231,122,.52)}
+.manifesto-globe i{width:38%;height:23%;left:10%;top:22%;transform:rotate(18deg)}
+.manifesto-globe b{width:31%;height:39%;right:12%;bottom:12%;transform:rotate(-24deg)}
+.manifesto-globe img{position:relative;z-index:2;width:38%;height:38%;filter:brightness(0) invert(1);opacity:.96;transform:rotate(12deg)}
+
+/* Happy Tails: use live PawPath listing photos, never a synthetic crop inside the number. */
+.tails-hero-collage{background:linear-gradient(135deg,#dfeee4,#f7f3e9);filter:none;transform:none;animation:none;overflow:hidden}
+.hero-animal-photo{position:absolute;width:24%;height:43%;object-fit:cover;border:10px solid rgba(255,255,255,.84);border-radius:28px;box-shadow:0 28px 70px rgba(19,35,28,.22);opacity:.56}
+.hero-animal-photo-1{left:2%;top:-7%;transform:rotate(-8deg)}.hero-animal-photo-2{left:25%;top:48%;transform:rotate(6deg)}.hero-animal-photo-3{left:45%;top:-10%;transform:rotate(-4deg)}.hero-animal-photo-4{right:8%;top:2%;transform:rotate(8deg)}.hero-animal-photo-5{right:-3%;bottom:-12%;transform:rotate(-5deg)}.hero-animal-photo-6{left:4%;bottom:-16%;transform:rotate(4deg)}.hero-animal-photo-7{left:54%;bottom:-17%;transform:rotate(-7deg)}
+.tails-hero-wash{background:linear-gradient(90deg,rgba(246,243,235,.99) 0%,rgba(246,243,235,.93) 42%,rgba(246,243,235,.38) 72%,rgba(246,243,235,.22))}
+.photo-number-stage{overflow:visible}
+.collage-photo{margin:0;background:none;width:clamp(100px,11vw,170px);aspect-ratio:4/5;padding:0;overflow:hidden;border:7px solid #fff}
+.collage-photo img{display:block;width:100%;height:100%;object-fit:contain;background:#dfeee4}
+.collage-photo figcaption{position:absolute;left:8px;right:8px;bottom:8px;padding:5px 7px;border-radius:8px;background:rgba(19,35,28,.78);color:#fff;font-size:.62rem;font-weight:800;text-align:center}
+.collage-photo-1{left:0;top:2%;transform:translate(-50px,-40px) rotate(-14deg)}.collage-photo-2{right:0;top:4%;transform:translate(50px,-35px) rotate(13deg)}.collage-photo-3{left:-2%;bottom:4%;transform:translate(-45px,45px) rotate(12deg)}.collage-photo-4{right:-1%;bottom:3%;transform:translate(45px,45px) rotate(-12deg)}
+.collage-photo-5{left:23%;top:-5%;transform:translateY(-60px) rotate(6deg)}.collage-photo-6{right:22%;bottom:-5%;transform:translateY(60px) rotate(6deg)}.collage-photo-7{right:5%;top:42%;transform:translateX(55px) rotate(10deg)}
+.photo-number-stage.is-visible .collage-photo-1{transform:rotate(-8deg)}.photo-number-stage.is-visible .collage-photo-2{transform:rotate(7deg)}.photo-number-stage.is-visible .collage-photo-3{transform:rotate(6deg)}.photo-number-stage.is-visible .collage-photo-4{transform:rotate(-7deg)}.photo-number-stage.is-visible .collage-photo-5{transform:rotate(4deg)}.photo-number-stage.is-visible .collage-photo-6{transform:rotate(5deg)}.photo-number-stage.is-visible .collage-photo-7{transform:rotate(7deg)}
+.tail-deck-section{background:linear-gradient(145deg,#13231c,#1a3f31)}
+.tail-flashcard{box-shadow:0 35px 90px rgba(0,0,0,.28)}
+@media(max-width:950px){.hero-animal-photo{width:34%}.collage-photo-7{display:none}}
+@media(max-width:600px){.hero-animal-photo{width:48%;height:34%;border-width:5px}.hero-animal-photo:nth-child(n+5){display:none}.collage-photo{width:86px;border-width:4px}.collage-photo-5,.collage-photo-6,.collage-photo-7{display:none}.collage-photo figcaption{display:none}}

@@ -71,8 +71,6 @@
       const visibility = Math.max(0, 1 - centreDistance / window.innerHeight);
       item.style.transform = `scale(${(.84 + visibility * .16).toFixed(3)}) rotate(${((1 - visibility) * 2.5).toFixed(2)}deg)`;
     });
-    const activeImage = carousel?.querySelector('.rescue-slide.is-active .rescue-slide-image');
-    if (activeImage && window.scrollY < window.innerHeight) activeImage.style.translate = `0 ${Math.round(window.scrollY * .07)}px`;
   };
   window.addEventListener('scroll', () => {
     if (!framePending) { framePending = true; requestAnimationFrame(updateMotion); }

@@ -1,8 +1,8 @@
 <%- include('partials/header') %>
-<% const helpedCount = Number(happyStats?.helped || 0); %>
+<% const helpedCount = Number(happyStats?.helped || 0); const realGallery = Array.isArray(galleryAnimals) ? galleryAnimals.filter(animal => animal.photo_url).slice(0,7) : []; %>
 
 <section class="tails-hero">
-  <div class="tails-hero-collage" aria-hidden="true"></div>
+  <div class="tails-hero-collage" aria-hidden="true"><% realGallery.forEach((animal,index) => { %><img class="hero-animal-photo hero-animal-photo-<%= index+1 %>" src="<%= animal.photo_url %>" alt=""><% }) %></div>
   <div class="tails-hero-wash" aria-hidden="true"></div>
   <div class="tails-hero-copy" data-tail-reveal>
     <h1>Every rescue deserves<br><em>a beautiful after.</em></h1>
@@ -15,10 +15,7 @@
 <section id="impact-collage" class="impact-collage">
   <div class="collage-intro" data-tail-reveal><h2>The number is made of lives, not metrics.</h2><p>Every accepted offer adds another animal to this total automatically.</p></div>
   <div class="photo-number-stage" data-impact-stage>
-    <div class="collage-photo collage-photo-1" aria-hidden="true"></div>
-    <div class="collage-photo collage-photo-2" aria-hidden="true"></div>
-    <div class="collage-photo collage-photo-3" aria-hidden="true"></div>
-    <div class="collage-photo collage-photo-4" aria-hidden="true"></div>
+    <% realGallery.forEach((animal,index) => { %><figure class="collage-photo collage-photo-<%= index+1 %>"><img src="<%= animal.photo_url %>" alt="<%= animal.name %>, a PawPath dog from <%= animal.locality %>"><figcaption><%= animal.name %></figcaption></figure><% }) %>
     <strong class="solid-impact-number" data-solid-count="<%= helpedCount %>" aria-label="<%= helpedCount %> animals helped">0</strong>
     <div class="photo-number-caption"><strong><%= helpedCount %></strong><span>safe next steps and counting</span></div>
   </div>

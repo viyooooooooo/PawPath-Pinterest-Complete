@@ -59,3 +59,12 @@ Existing PostgreSQL data is preserved. New columns are added automatically when 
 - Happy Tail cards change only when a story name is clicked. Wheel/scroll-driven card switching and scroll-linked photo motion were removed.
 - Members can delete only the Happy Tail stories they personally published.
 
+# Real-photo and responsive-layout polish
+
+- Happy Tales now builds its hero and impact collage from up to seven real dog photos already uploaded to PawPath listings. It no longer relies on Pinterest hotlinks or generated collage crops.
+- The impact number stays solid PawPath green while the listing photos animate around it.
+- The profile messaging/suggestion interface now constrains long listing names, selects, text areas and buttons to their card, removing horizontal overflow.
+- The Explore carousel uses the supplied watercolor green-paw artwork instead of the black background.
+- Explore photos use a contained, non-scrolling frame so portrait and landscape uploads remain visible without sliding outside the frame.
+- The Explore network orbit now includes a PawPath paw inside a small earth-style globe.
+
