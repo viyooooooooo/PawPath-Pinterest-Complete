@@ -279,7 +279,8 @@ app.get('/', async (req, res, next) => {
     const featured = await all(`SELECT animals.*, users.username, users.verification_status FROM animals JOIN users ON users.id=animals.user_id WHERE animals.species='Dog' AND animals.status NOT IN ('Adopted','Resolved') ORDER BY CASE animals.urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, animals.created_at DESC LIMIT 5`);
     const profiles = await all(`SELECT users.*, COUNT(animals.id) AS listing_count FROM users LEFT JOIN animals ON animals.user_id=users.id WHERE users.verification_status='Verified' GROUP BY users.id ORDER BY listing_count DESC, users.username LIMIT 6`);
     const stories = await all(`SELECT rescue_updates.*, animals.name AS animal_name, animals.photo_url FROM rescue_updates JOIN animals ON animals.id = rescue_updates.animal_id ORDER BY rescue_updates.created_at DESC LIMIT 3`);
-    res.render('home', { title: 'PawPath | Rescue, foster and adopt responsibly', urgent, stats, animals, featured, stories, profiles, mapAssets: true, exploreAssets: true });
+    const happyStats = await get(`SELECT COUNT(DISTINCT animal_id) AS helped, COUNT(*) AS accepted_offers FROM applications WHERE status='Accepted'`);
+    res.render('home', { title: 'PawPath | Rescue, foster and adopt responsibly', urgent, stats, happyStats, animals, featured, stories, profiles, mapAssets: true, exploreAssets: true });
   } catch (error) { next(error); }
 });
 
@@ -287,24 +288,25 @@ app.get('/happy-tails', async (req, res, next) => {
   try {
     const stories = await all(`SELECT happy_tails.*,users.username FROM happy_tails LEFT JOIN users ON users.id=happy_tails.user_id ORDER BY happy_tails.created_at DESC`);
     const adoptedAnimals = req.session.user ? await all(`SELECT DISTINCT animals.id,animals.name FROM applications JOIN animals ON animals.id=applications.animal_id WHERE applications.user_id=? AND applications.status='Accepted' ORDER BY animals.name`, [req.session.user.id]) : [];
-    res.render('happy-tails', { title: 'Happy Tails | PawPath', stories, adoptedAnimals, errors: [] });
+    const happyStats = await get(`SELECT COUNT(DISTINCT animal_id) AS helped, COUNT(*) AS accepted_offers FROM applications WHERE status='Accepted'`);
+    res.render('happy-tails', { title: 'Happy Tails | PawPath', stories, adoptedAnimals, happyStats, errors: [], happyTailsAssets: true });
   } catch (error) { next(error); }
 });
 
 app.post('/happy-tails', requireLogin, upload.single('after_photo'), async (req, res, next) => {
   try {
-    const adopted = await get(`SELECT animals.id,animals.name FROM applications JOIN animals ON animals.id=applications.animal_id WHERE applications.user_id=? AND applications.status='Accepted' AND animals.id=?`, [req.session.user.id, req.body.animal_id]);
+    const adopted = await get(`SELECT animals.id,animals.name,animals.photo_url FROM applications JOIN animals ON animals.id=applications.animal_id WHERE applications.user_id=? AND applications.status='Accepted' AND animals.id=?`, [req.session.user.id, req.body.animal_id]);
     const errors = [];
     if (!adopted) errors.push('Choose an animal whose adoption offer was accepted.');
     if (String(req.body.title || '').trim().length < 5) errors.push('Add a short title for your happy tale.');
     if (String(req.body.story_text || '').trim().length < 40) errors.push('Tell us a little more about life after adoption.');
-    if (!req.file) errors.push('Please add a recent photo after adoption.');
     if (errors.length) {
       const stories = await all(`SELECT happy_tails.*,users.username FROM happy_tails LEFT JOIN users ON users.id=happy_tails.user_id ORDER BY happy_tails.created_at DESC`);
       const adoptedAnimals = await all(`SELECT DISTINCT animals.id,animals.name FROM applications JOIN animals ON animals.id=applications.animal_id WHERE applications.user_id=? AND applications.status='Accepted' ORDER BY animals.name`, [req.session.user.id]);
-      return res.status(400).render('happy-tails', { title: 'Happy Tails | PawPath', stories, adoptedAnimals, errors });
+      const happyStats = await get(`SELECT COUNT(DISTINCT animal_id) AS helped, COUNT(*) AS accepted_offers FROM applications WHERE status='Accepted'`);
+      return res.status(400).render('happy-tails', { title: 'Happy Tails | PawPath', stories, adoptedAnimals, happyStats, errors, happyTailsAssets: true });
     }
-    const photo = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    const photo = req.file ? `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}` : (adopted.photo_url || '');
     await run('INSERT INTO happy_tails (user_id,animal_id,dog_name,title,story_text,after_photo_url) VALUES (?,?,?,?,?,?)', [req.session.user.id, adopted.id, adopted.name, req.body.title.trim(), req.body.story_text.trim(), photo]);
     flash(req, 'success', `${adopted.name}'s happy tale is now part of the PawPath family.`); res.redirect('/happy-tails');
   } catch (error) { next(error); }

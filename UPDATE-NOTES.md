@@ -29,3 +29,12 @@ Existing PostgreSQL data is preserved. New columns are added automatically when 
 - Separates veterinary certificate verification from ordinary member-to-vet verification.
 - Adds an admin veterinary credential queue and prevents unverified vets from reviewing members.
 - Reclassifies `vyomika22sahay@gmail.com` as a veterinarian account without falsely marking it verified.
+# Happy Tails motion and accepted-listing update
+
+- Accepted animals now keep the exact regular listing-card proportions, with a green treatment and an `ACCEPTED` badge.
+- Happy Tails has a new scroll-led hero, animated impact counter, reveal motion, story-card depth and reduced-motion accessibility support.
+- Happy Tail photos are optional. PawPath falls back to the animal listing photo, then to a designed no-photo state.
+- Explore now includes an animated Happy Tails impact feature.
+- The helped counter is calculated from distinct animals with accepted offers, so it updates automatically and cannot drift from the offer workflow.
+- `vyomika22sahay@gmail.com` is idempotently promoted to a verified veterinarian during database initialization and can review assigned volunteer applications.
+

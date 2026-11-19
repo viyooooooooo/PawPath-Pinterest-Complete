@@ -1,8 +1,9 @@
-<article class="animal-card <%= ['Critical','Needs Help Today'].includes(animal.urgency) ? 'animal-critical' : '' %> <%= ['Adopted','Resolved'].includes(animal.status) ? 'listing-completed' : '' %>">
+<% const isAccepted = ['Adopted','Resolved'].includes(animal.status); %>
+<article class="animal-card <%= !isAccepted && ['Critical','Needs Help Today'].includes(animal.urgency) ? 'animal-critical' : '' %> <%= isAccepted ? 'listing-completed' : '' %>">
   <a class="animal-photo" href="/animals/<%= animal.id %>">
     <% if (animal.photo_url) { %><img src="<%= animal.photo_url %>" alt="<%= animal.name %>" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"> <% } %>
     <span class="animal-photo-placeholder" style="display:<%= animal.photo_url ? 'none' : 'grid' %>">Photo not added<small>Help identify this animal</small></span>
-    <span class="need-pill"><%= ['Critical','Needs Help Today'].includes(animal.urgency) ? 'URGENT SOS' : animal.category %></span>
+    <span class="need-pill"><%= isAccepted ? '✓ ACCEPTED' : ['Critical','Needs Help Today'].includes(animal.urgency) ? 'URGENT SOS' : animal.category %></span>
   </a>
   <div class="animal-copy"><div><h3><a href="/animals/<%= animal.id %>"><%= animal.name %></a></h3><p><%= animal.species %> · <%= animal.age %> · <%= animal.locality %></p></div><div class="owner-line"><span><%= (animal.username || 'PawPath member').charAt(0) %></span><small>Listed by <b><%= animal.username || 'PawPath member' %></b> <% if (animal.verification_status === 'Verified') { %><i>✓ verified</i><% } %></small></div><a class="card-arrow" href="/animals/<%= animal.id %>">View details →</a></div>
 </article>

@@ -46,6 +46,18 @@
   }
 
   const progress = document.querySelector('.scroll-progress span');
+  const impactNumber = document.querySelector('[data-impact-count]');
+  if (impactNumber) {
+    const target = Number(impactNumber.dataset.impactCount || 0);
+    const animateCount = () => {
+      if (reduceMotion) { impactNumber.textContent = target.toLocaleString('en-IN'); return; }
+      const started = performance.now();
+      const tick = (now) => { const p = Math.min(1, (now - started) / 1400); impactNumber.textContent = Math.round(target * (1 - Math.pow(1 - p, 4))).toLocaleString('en-IN'); if (p < 1) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+    };
+    const countObserver = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) { animateCount(); countObserver.disconnect(); } }, { threshold: .45 });
+    countObserver.observe(impactNumber);
+  }
   const scaleItems = [...document.querySelectorAll('[data-scroll-scale]')];
   let framePending = false;
   const updateMotion = () => {

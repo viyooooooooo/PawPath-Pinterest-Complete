@@ -304,10 +304,12 @@ async function initialiseDatabase() {
   // completed-listing layout. This is safe and idempotent on every deploy.
   await run("UPDATE animals SET status='Adopted' WHERE id IN (SELECT animal_id FROM applications WHERE status='Accepted') AND status NOT IN ('Adopted','Resolved')");
 
-  // Requested account correction: classify this existing member as a vet.
-  // Verification is deliberately not granted until a certificate is reviewed.
+  // Requested account correction: this known account is a verified vet and can
+  // review volunteer applications. Idempotent so existing deployments are fixed
+  // automatically on their next start without touching unrelated accounts.
   await run(`UPDATE users SET entity_type='Veterinarian / vet clinic', role='Veterinarian',
-    vet_certificate_status=CASE WHEN COALESCE(verification_document,'')='' THEN 'Not submitted' ELSE 'Under review' END
+    verification_status='Verified', verified_at=COALESCE(verified_at,CURRENT_TIMESTAMP),
+    vet_certificate_status='Approved', vet_certificate_notes=COALESCE(NULLIF(vet_certificate_notes,''),'Approved verified veterinarian account')
     WHERE LOWER(email)='vyomika22sahay@gmail.com'`);
   await allowGeneralConversations();
   // The SQLite compatibility rebuild above can replace the conversations table.
