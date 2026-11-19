@@ -6,8 +6,9 @@
 <section class="rescue-carousel" data-rescue-carousel aria-label="Featured rescue dogs">
   <div class="rescue-slides">
     <% featuredRescues.forEach((animal, index) => { %>
-      <article class="rescue-slide <%= index === 0 ? 'is-active' : '' %>" data-rescue-slide aria-hidden="<%= index === 0 ? 'false' : 'true' %>">
-        <img class="rescue-slide-image" src="<%= animal.photo_url %>" alt="<%= animal.name %>, a rescue dog in <%= animal.locality %>">
+      <article class="rescue-slide <%= index === 0 ? 'is-active' : '' %>" data-rescue-slide aria-hidden="<%= index === 0 ? 'false' : 'true' %>" style="--slide-photo:url('<%= animal.photo_url %>')">
+        <div class="rescue-slide-backdrop" aria-hidden="true"></div>
+        <div class="rescue-slide-photo-frame"><img class="rescue-slide-image" src="<%= animal.photo_url %>" alt="<%= animal.name %>, a rescue dog in <%= animal.locality %>"></div>
         <div class="rescue-slide-wash"></div>
         <div class="rescue-slide-content">
           <h1><%= animal.name %><span> needs a safe next step.</span></h1>

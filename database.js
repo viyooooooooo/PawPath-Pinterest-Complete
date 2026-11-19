@@ -99,7 +99,6 @@ async function initialiseDatabase() {
     profile_photo TEXT, verification_status TEXT NOT NULL DEFAULT 'Unverified', verified_at TEXT, is_admin INTEGER NOT NULL DEFAULT 0,
     entity_type TEXT NOT NULL DEFAULT 'Volunteer / rescuer', organisation_name TEXT,
     phone TEXT, show_phone INTEGER NOT NULL DEFAULT 0, public_email TEXT, show_public_email INTEGER NOT NULL DEFAULT 0,
-    show_full_address INTEGER NOT NULL DEFAULT 0,
     instagram_handle TEXT, show_instagram INTEGER NOT NULL DEFAULT 0, website TEXT, show_website INTEGER NOT NULL DEFAULT 0,
     verification_document TEXT,
     vet_registration_number TEXT, vet_council_name TEXT,
@@ -121,7 +120,6 @@ async function initialiseDatabase() {
   await addColumn('users', 'show_phone INTEGER NOT NULL DEFAULT 0');
   await addColumn('users', 'public_email TEXT');
   await addColumn('users', 'show_public_email INTEGER NOT NULL DEFAULT 0');
-  await addColumn('users', 'show_full_address INTEGER NOT NULL DEFAULT 0');
   await addColumn('users', 'instagram_handle TEXT');
   await addColumn('users', 'show_instagram INTEGER NOT NULL DEFAULT 0');
   await addColumn('users', 'website TEXT');

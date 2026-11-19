@@ -17,14 +17,13 @@
   <link rel="stylesheet" href="/css/network.css">
   <link rel="stylesheet" href="/css/workflow.css">
   <link rel="stylesheet" href="/css/happy-tails.css">
-  <link rel="stylesheet" href="/css/explore-palette.css">
-  <link rel="stylesheet" href="/css/motion-polish.css">
   <link rel="stylesheet" href="/css/accountability.css">
   <% if (typeof mapAssets !== 'undefined' && mapAssets) { %>
     <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.19.0/dist/maplibre-gl.css">
     <link rel="stylesheet" href="/css/map.css">
   <% } %>
   <% if (typeof exploreAssets !== 'undefined' && exploreAssets) { %><link rel="stylesheet" href="/css/explore-motion.css"><% } %>
+  <link rel="stylesheet" href="/css/ui-refresh.css">
 </head>
 <body class="<%= typeof exploreAssets !== 'undefined' && exploreAssets ? 'explore-experience' : '' %><%= typeof mapAssets !== 'undefined' && mapAssets ? ' map-experience' : '' %><%= typeof happyTailsAssets !== 'undefined' && happyTailsAssets ? ' happy-tails-experience' : '' %>">
   <header class="site-header">

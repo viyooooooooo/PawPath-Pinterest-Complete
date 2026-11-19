@@ -1,31 +1,34 @@
 <%- include('partials/header') %>
-<% const helpedCount = Number(happyStats?.helped || 0); const leadStory = stories[0]; %>
+<% const helpedCount = Number(happyStats?.helped || 0); %>
 
 <section class="tails-hero">
-  <div data-tail-reveal>
-    <h1>One “yes” can change<br><em>an entire life.</em></h1>
-    <p>Real journeys from rescue to safety, told by the people who stayed for the next chapter.</p>
-    <div class="hero-actions"><a class="button" href="#tail-stories">Meet the happy tails</a><a class="text-link" href="#impact-collage"><%= helpedCount.toLocaleString('en-IN') %> lives and counting ↓</a></div>
+  <div class="tails-hero-collage" aria-hidden="true"></div>
+  <div class="tails-hero-wash" aria-hidden="true"></div>
+  <div class="tails-hero-copy" data-tail-reveal>
+    <h1>Every rescue deserves<br><em>a beautiful after.</em></h1>
+    <p>Real journeys after animals found safety, care and a family through PawPath.</p>
+    <div class="tails-hero-actions"><a class="button" href="#tail-stories">Read their stories</a><a class="text-link" href="#impact-collage">See the impact ↓</a></div>
   </div>
-  <div class="tails-hero-feature" aria-label="Featured Happy Tail">
-    <% if (leadStory?.after_photo_url) { %><img src="<%= leadStory.after_photo_url %>" alt="<%= leadStory.dog_name %> after adoption"><% } else { %><div class="tails-hero-art"><span>♡</span><b>SAFE<br>AT LAST</b></div><% } %>
-    <div><strong><%= leadStory?.dog_name || 'The next chapter' %></strong><span><%= leadStory?.title || 'A happy story is waiting to be shared.' %></span></div>
-  </div>
+  <div class="tails-hero-stat" data-tail-reveal><strong><%= helpedCount %></strong><span>safe next steps<br>and counting</span></div>
 </section>
 
 <section id="impact-collage" class="impact-collage">
   <div class="collage-intro" data-tail-reveal><h2>The number is made of lives, not metrics.</h2><p>Every accepted offer adds another animal to this total automatically.</p></div>
-  <div class="photo-number-stage" data-tail-reveal>
-    <div class="impact-tile impact-tile-1" aria-hidden="true"></div><div class="impact-tile impact-tile-2" aria-hidden="true"></div><div class="impact-tile impact-tile-3" aria-hidden="true"></div><div class="impact-tile impact-tile-4" aria-hidden="true"></div>
-    <strong class="solid-impact-number" aria-label="<%= helpedCount %> animals helped"><%= helpedCount %></strong>
+  <div class="photo-number-stage" data-impact-stage>
+    <div class="collage-photo collage-photo-1" aria-hidden="true"></div>
+    <div class="collage-photo collage-photo-2" aria-hidden="true"></div>
+    <div class="collage-photo collage-photo-3" aria-hidden="true"></div>
+    <div class="collage-photo collage-photo-4" aria-hidden="true"></div>
+    <strong class="solid-impact-number" data-solid-count="<%= helpedCount %>" aria-label="<%= helpedCount %> animals helped">0</strong>
     <div class="photo-number-caption"><strong><%= helpedCount %></strong><span>safe next steps and counting</span></div>
   </div>
 </section>
 
 <section id="tail-stories" class="tail-deck-section">
-  <div class="tail-deck-copy" data-tail-reveal><h2>Every card holds a new beginning.</h2><p>All stories stay visible. Hover, focus or tap a card to bring it forward.</p></div>
+  <div class="tail-deck-copy" data-tail-reveal><h2>Choose a story.<br>Meet the new beginning.</h2><p>Click a name to open another card. Nothing changes while you scroll.</p></div>
   <% if (stories.length) { %><div class="tail-deck" data-tail-deck aria-label="Happy Tails story cards">
-    <div class="tail-card-stage"><% stories.forEach((story,index) => { %><article class="tail-flashcard <%= index===0?'is-active':'' %>" data-tail-card="<%= index %>" tabindex="0" style="--card-index:<%= index %>;--card-count:<%= stories.length %>"><div class="tail-card-photo"><% if (story.after_photo_url) { %><img src="<%= story.after_photo_url %>" alt="<%= story.dog_name %> after adoption"><% } else { %><div class="happy-photo-fallback"><span>♡</span><small>Photo optional.<br>The story still matters.</small></div><% } %></div><div class="tail-card-story"><small>HAPPY TAIL #<%= String(story.id).padStart(2,'0') %></small><h3><%= story.dog_name %></h3><h2><%= story.title %></h2><p><%= story.story_text %></p><footer>Shared by <strong><%= story.username || 'a PawPath family' %></strong> · <%= new Date(story.created_at).toLocaleDateString('en-IN',{month:'long',year:'numeric'}) %></footer></div></article><% }) %></div>
+    <div class="tail-card-stage"><% stories.forEach((story,index) => { %><article class="tail-flashcard <%= index===0?'is-active':'' %>" data-tail-card="<%= index %>" aria-hidden="<%= index===0?'false':'true' %>"><div class="tail-card-photo"><% if (story.after_photo_url) { %><img src="<%= story.after_photo_url %>" alt="<%= story.dog_name %> after adoption"><% } else { %><div class="happy-photo-fallback"><span>♡</span><small>Photo optional.<br>The story still matters.</small></div><% } %></div><div class="tail-card-story"><small>HAPPY TAIL #<%= String(story.id).padStart(2,'0') %></small><h3><%= story.dog_name %></h3><h2><%= story.title %></h2><p><%= story.story_text %></p><footer>Shared by <strong><%= story.username || 'a PawPath family' %></strong> · <%= new Date(story.created_at).toLocaleDateString('en-IN',{month:'long',year:'numeric'}) %></footer><% if (currentUser && Number(currentUser.id)===Number(story.user_id)) { %><form method="post" action="/happy-tails/<%= story.id %>/delete" class="tail-delete-form" onsubmit="return confirm('Delete this Happy Tail? This cannot be undone.')"><button type="submit">Delete my story</button></form><% } %></div></article><% }) %></div>
+    <nav class="tail-card-picker" aria-label="Choose a Happy Tail"><% stories.forEach((story,index) => { %><button type="button" class="<%= index===0?'is-active':'' %>" data-tail-pick="<%= index %>" aria-pressed="<%= index===0?'true':'false' %>"><span><%= String(index+1).padStart(2,'0') %></span><strong><%= story.dog_name %></strong></button><% }) %></nav>
   </div><% } else { %><div class="tails-empty"><span>♡</span><h2>The first happy chapter is waiting to be shared.</h2></div><% } %>
 </section>
 
