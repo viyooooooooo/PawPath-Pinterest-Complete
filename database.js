@@ -308,9 +308,9 @@ async function initialiseDatabase() {
   // review volunteer applications. Idempotent so existing deployments are fixed
   // automatically on their next start without touching unrelated accounts.
   await run(`UPDATE users SET entity_type='Veterinarian / vet clinic', role='Veterinarian',
-    verification_status='Verified', verified_at=COALESCE(verified_at,CURRENT_TIMESTAMP),
+    verification_status='Verified', verified_at=COALESCE(verified_at,?),
     vet_certificate_status='Approved', vet_certificate_notes=COALESCE(NULLIF(vet_certificate_notes,''),'Approved verified veterinarian account')
-    WHERE LOWER(email)='vyomika22sahay@gmail.com'`);
+    WHERE LOWER(email)='vyomika22sahay@gmail.com'`, [new Date().toISOString()]);
   await allowGeneralConversations();
   // The SQLite compatibility rebuild above can replace the conversations table.
   // Re-assert these columns afterwards so upgrades from every older schema work.
