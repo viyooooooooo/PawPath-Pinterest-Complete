@@ -1,5 +1,6 @@
 /* Final responsive and visual polish. Loaded last so these safety rules win. */
 html,body{max-width:100%;overflow-x:clip}
+.main-nav{gap:clamp(13px,1.55vw,30px)}
 
 /* Keep the profile contact and suggestion forms inside their card at every width. */
 .approach-section,.approach-card,.approach-card-chat,.contact-copy,.contact-options,.approach-form,.listing-message-form{min-width:0;max-width:100%;box-sizing:border-box}

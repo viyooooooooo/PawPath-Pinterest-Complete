@@ -1,0 +1,79 @@
+<%- include('partials/header') %>
+<% const dogs = Array.isArray(galleryDogs) ? galleryDogs.filter(dog => dog.photo_url) : []; const threadPhotos = dogs.length ? Array.from({length:8},(_,index) => dogs[index % dogs.length]) : []; %>
+
+<section class="about-hero">
+  <div class="about-hero-pattern" aria-hidden="true"></div>
+  <div class="about-hero-wash" aria-hidden="true"></div>
+  <div class="about-hero-copy">
+    <p class="about-handwritten">A little corner of the internet, made with a lot of heart ♡</p>
+    <h1>For every animal waiting—and every person who stopped.</h1>
+    <p>PawPath is here to make the distance between finding an animal and finding real help feel smaller, clearer and kinder.</p>
+    <a class="button" href="#our-story">Follow our story ↓</a>
+  </div>
+  <div class="about-hero-photos" aria-label="Dogs currently listed on PawPath">
+    <% [0,1,2,3].forEach((slot) => { const dog = dogs[slot]; %>
+      <figure class="about-polaroid about-polaroid-<%= slot+1 %>"><% if (dog) { %><img src="<%= dog.photo_url %>" alt="<%= dog.name %>, a PawPath listing"><figcaption><%= dog.name %> · <%= dog.locality %></figcaption><% } else { %><div class="about-photo-fallback">🐾</div><figcaption>A PawPath friend</figcaption><% } %></figure>
+    <% }) %>
+    <span class="about-doodle-heart" aria-hidden="true">♡</span>
+  </div>
+</section>
+
+<section class="about-note">
+  <p>PawPath began with a simple, uncomfortable truth:</p>
+  <h2>Help exists. Care exists. Kind people exist.<br><em>But finding the right next step is still too hard.</em></h2>
+</section>
+
+<section id="our-story" class="about-story" data-about-story>
+  <div class="about-chapters">
+    <article class="about-chapter is-active" data-about-step="0">
+      <span class="about-step-number">01</span>
+      <h2>Why are we doing this?</h2>
+      <p>Because the moment someone finds an injured, hungry or frightened animal, they should not have to feel alone. They should not need fifteen tabs, five unanswered calls and a confusing chain of forwarded messages just to work out what to do next.</p>
+      <p>We wanted to turn that overwhelming moment into a path: report what happened, place the animal on the map, find nearby care and keep moving.</p>
+      <blockquote>Compassion should have somewhere useful to go.</blockquote>
+    </article>
+
+    <article class="about-chapter" data-about-step="1">
+      <span class="about-step-number">02</span>
+      <h2>What are we trying to solve?</h2>
+      <p>Animal-help information is often scattered across social posts, private chats and old contact lists. A listing can disappear in a feed. A volunteer may never see the case. A shelter may be contacted without the details it needs.</p>
+      <p>PawPath keeps the animal, location, urgency, care notes, offers and updates together—so the case has context, not just visibility.</p>
+      <ul><li>One clear listing instead of a trail of screenshots.</li><li>Real location context: safely with the lister, or last spotted.</li><li>Contacts and conversations that remain attached to the case.</li></ul>
+    </article>
+
+    <article class="about-chapter" data-about-step="2">
+      <span class="about-step-number">03</span>
+      <h2>How does PawPath help?</h2>
+      <p>It brings the rescue journey into one connected place. Someone can report an animal, choose an exact pin, reach volunteers, clinics or organisations, send a responsible offer and continue the conversation without losing the story.</p>
+      <div class="about-method-grid"><div><b>⌖</b><strong>See the need</strong><small>Listings and SOS cases appear with useful location context.</small></div><div><b>♡</b><strong>Find the people</strong><small>Volunteers, veterinarians, shelters and organisations share one network.</small></div><div><b>✓</b><strong>Keep it accountable</strong><small>Offers, verification, messages and journey updates preserve the next steps.</small></div></div>
+    </article>
+
+    <article class="about-chapter" data-about-step="3">
+      <span class="about-step-number">04</span>
+      <h2>What future do we want to serve?</h2>
+      <p>A future where helping a stray animal is not dependent on already knowing the right person. Where a student, neighbour, feeder, rescuer, veterinarian or family can enter at different points and still become part of the same path.</p>
+      <p>We want fewer cases to disappear after the first post—and more journeys to end with safety, treatment, foster care, adoption or simply one caring person showing up at the right time.</p>
+      <blockquote>Not every person can do everything. But every useful next step matters.</blockquote>
+    </article>
+  </div>
+
+  <aside class="about-thread-column" aria-label="A connected thread of PawPath animals">
+    <div class="about-thread-window" data-thread-window>
+      <div class="about-thread-rail" data-thread-rail>
+        <% [0,1,2,3].forEach((step) => { %><div class="about-thread-node" data-thread-node="<%= step %>">
+          <span class="thread-knot thread-knot-top"></span><span class="thread-knot thread-knot-bottom"></span>
+          <% [0,1].forEach((offset) => { const dog = threadPhotos[(step*2)+offset]; %><figure class="thread-photo thread-photo-<%= offset+1 %>"><% if (dog) { %><img src="<%= dog.photo_url %>" alt="<%= dog.name %>"><figcaption><span><%= dog.name %></span><small><%= dog.status %></small></figcaption><% } else { %><div class="about-photo-fallback">🐾</div><figcaption><span>A little life</span><small>worth showing up for</small></figcaption><% } %></figure><% }) %>
+          <span class="thread-note"><%= ['Every rescue begins with someone noticing.','A clear story helps care find its way.','Small actions become a connected path.','This is the future we are walking toward.'][step] %></span>
+        </div><% }) %>
+      </div>
+    </div>
+    <nav class="about-progress" aria-label="About page chapters"><% ['Why','The gap','Our way','The future'].forEach((label,index) => { %><button type="button" class="<%= index===0?'is-active':'' %>" data-about-jump="<%= index %>"><i></i><span><%= label %></span></button><% }) %></nav>
+  </aside>
+</section>
+
+<section class="about-promise">
+  <div class="about-promise-pattern" aria-hidden="true"></div>
+  <div><p>Our promise</p><h2>Keep the animal at the centre.<br>Keep the path human.</h2><span>Clearer information. Safer choices. More accountable care. And always, a little hope.</span></div>
+  <aside><strong><%= Number(aboutStats?.listings || 0).toLocaleString('en-IN') %></strong><span>animal stories placed on a path toward help</span><a class="button" href="/animals">Meet them →</a></aside>
+</section>
+<%- include('partials/footer') %>

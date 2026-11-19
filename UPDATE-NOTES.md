@@ -82,3 +82,11 @@ Existing PostgreSQL data is preserved. New columns are added automatically when 
 - “Open selected pin” now stays inside PawPath, centres the PawPath Map on the saved listing coordinates and opens the matching animal marker.
 - Last-seen wording now states clearly: “The animal is not with the lister. This is where it was last seen.”
 
+# About Us story experience
+
+- Added a heartfelt About Us page linked from the main navigation.
+- The opening and closing sections reuse the supplied green watercolor paw artwork.
+- Real dog photos from current PawPath listings appear as playful polaroids and along a connected vertical memory thread.
+- Four scroll-led chapters explain why PawPath exists, the problem it addresses, how it helps and the future it hopes to serve.
+- The sticky photo thread moves one connected group at a time as each chapter becomes active, with clickable chapter navigation and reduced-motion support.
+

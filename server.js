@@ -285,6 +285,14 @@ app.get('/', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.get('/about', async (req, res, next) => {
+  try {
+    const galleryDogs = await all(`SELECT id,name,photo_url,locality,status FROM animals WHERE species='Dog' AND COALESCE(photo_url,'')<>'' ORDER BY CASE WHEN status NOT IN ('Adopted','Resolved') THEN 0 ELSE 1 END, created_at DESC LIMIT 10`);
+    const aboutStats = await get(`SELECT COUNT(*) AS listings, SUM(CASE WHEN status IN ('Adopted','Resolved') THEN 1 ELSE 0 END) AS completed FROM animals`);
+    res.render('about', { title: 'About Us | PawPath', galleryDogs, aboutStats, aboutAssets: true });
+  } catch (error) { next(error); }
+});
+
 app.get('/happy-tails', async (req, res, next) => {
   try {
     const stories = await all(`SELECT happy_tails.*,users.username FROM happy_tails LEFT JOIN users ON users.id=happy_tails.user_id ORDER BY happy_tails.created_at DESC`);
