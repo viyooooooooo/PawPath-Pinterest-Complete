@@ -91,7 +91,7 @@ const networkDirectoryCte = `WITH network AS (
     COALESCE(directory_entries.phone_primary, '') AS phone_primary,
     COALESCE(directory_entries.phone_secondary, '') AS phone_secondary,
     COALESCE(directory_entries.email, '') AS public_email,
-    '' AS website,
+    COALESCE(directory_entries.website, '') AS website,
     '' AS instagram_handle,
     COALESCE(directory_entries.source_url, '') AS source_url,
     directory_entries.trust_status,
@@ -481,7 +481,9 @@ app.get('/directory/:id', async (req, res, next) => {
     const entry = await get('SELECT * FROM directory_entries WHERE id=?', [req.params.id]);
     if (!entry) return res.status(404).render('error', { title: 'Directory record not found | PawPath', message: 'That network record does not exist.' });
     entry.source_url = safeWebsite(entry.source_url);
-    res.render('directory-detail', { title: `${entry.name} | PawPath`, entry });
+    entry.website = safeWebsite(entry.website);
+    const complaintRisk = await get("SELECT COUNT(DISTINCT reporter_user_id) AS reporters FROM complaints WHERE target_directory_id=? AND status IN ('Submitted','Under review','Substantiated')", [entry.id]);
+    res.render('directory-detail', { title: `${entry.name} | PawPath`, entry, complaintReporters: Number(complaintRisk?.reporters || 0) });
   } catch (error) { next(error); }
 });
 
@@ -493,7 +495,8 @@ app.get('/profiles/:id', async (req, res, next) => {
     const listings = await all("SELECT * FROM animals WHERE user_id=? ORDER BY CASE urgency WHEN 'Critical' THEN 1 WHEN 'Needs Help Today' THEN 2 ELSE 3 END, created_at DESC", [profile.id]);
     const ownListings = req.session.user ? await all("SELECT * FROM animals WHERE user_id=? AND status NOT IN ('Adopted','Resolved') ORDER BY created_at DESC", [req.session.user.id]) : [];
     const listingMatches = ownListings.map((listing) => ({ id: listing.id, score: listingMatchScore(listing, profile) }));
-    res.render('profile-detail', { title: `${profile.username} | PawPath`, profile, listings, ownListings, listingMatches });
+    const complaintRisk = await get("SELECT COUNT(DISTINCT reporter_user_id) AS reporters FROM complaints WHERE target_user_id=? AND status IN ('Submitted','Under review','Substantiated')", [profile.id]);
+    res.render('profile-detail', { title: `${profile.username} | PawPath`, profile, listings, ownListings, listingMatches, complaintReporters: Number(complaintRisk?.reporters || 0) });
   } catch (error) { next(error); }
 });
 
@@ -788,7 +791,7 @@ app.get('/notifications/:id/open', requireLogin, async (req, res, next) => {
   try {
     const notification = await get('SELECT * FROM notifications WHERE id=? AND user_id=?', [req.params.id, req.session.user.id]);
     if (!notification) return res.redirect('/notifications');
-    await run('UPDATE notifications SET is_read=1 WHERE id=?', [notification.id]);
+    await run('UPDATE notifications SET is_read=1,dismissed_at=? WHERE id=?', [new Date().toISOString(), notification.id]);
     res.redirect(notification.url);
   } catch (error) { next(error); }
 });
@@ -892,7 +895,10 @@ app.get('/verification/apply', requireLogin, async (req, res, next) => {
     if (applicant?.entity_type === 'Veterinarian / vet clinic') { flash(req, 'error', 'Veterinarians are verified from their own registration certificate, not by another veterinarian.'); return res.redirect('/dashboard'); }
     const existing = await get('SELECT * FROM verification_applications WHERE user_id=?', [req.session.user.id]);
     const vets = await all("SELECT id,username,organisation_name,locality,verification_status FROM users WHERE entity_type='Veterinarian / vet clinic' AND verification_status='Verified' AND id<>? ORDER BY username", [req.session.user.id]);
-    res.render('verification', { title: 'Apply for verification | PawPath', errors: [], values: existing || {}, vets });
+    const directoryVets = await all("SELECT id,name,city,state,email,phone_primary FROM directory_entries WHERE category='vets' ORDER BY name");
+    const values = { ...(existing || {}) };
+    if (req.query.directory_vet_id) { values.selected_vet_directory_id = req.query.directory_vet_id; values.selected_vet_user_id = ''; }
+    res.render('verification', { title: 'Apply for verification | PawPath', errors: [], values, vets, directoryVets });
   } catch (error) { next(error); }
 });
 
@@ -942,27 +948,58 @@ app.post('/admin/vets/:id/decision', requireLogin, requireAdmin, async (req, res
 
 app.post('/verification/apply', requireLogin, proofUpload.single('proof_document'), async (req, res, next) => {
   const b = req.body;
-  const required = ['applicant_type','full_name','phone','address','government_id_type','government_id_reference','selected_vet_user_id','residence_proof_reference','pet_experience','household_consent','home_visit_consent','welfare_commitment'];
+  const required = ['applicant_type','full_name','phone','address','government_id_type','government_id_reference','residence_proof_reference','pet_experience','household_consent','home_visit_consent','welfare_commitment'];
   const errors = required.filter((field) => !String(b[field] || '').trim()).map((field) => `${field.replaceAll('_', ' ')} is required.`);
+  if (!b.selected_vet_user_id && !b.selected_vet_directory_id) errors.push('Choose either a PawPath vet or a listed directory vet.');
+  if (b.selected_vet_user_id && b.selected_vet_directory_id) errors.push('Choose only one veterinarian review route.');
   if (!/^\d{10}$/.test(String(b.phone || '').replace(/\s/g, ''))) errors.push('Enter a valid 10-digit phone number.');
   try {
     const applicant = await get('SELECT entity_type FROM users WHERE id=?', [req.session.user.id]);
     if (applicant?.entity_type === 'Veterinarian / vet clinic') { flash(req, 'error', 'Veterinarians use certificate verification and do not request another vet review.'); return res.redirect('/dashboard'); }
     const vets = await all("SELECT id,username,organisation_name,locality,verification_status,phone FROM users WHERE entity_type='Veterinarian / vet clinic' AND verification_status='Verified' AND id<>? ORDER BY username", [req.session.user.id]);
-    const selectedVet = vets.find((vet) => Number(vet.id) === Number(b.selected_vet_user_id));
-    if (!selectedVet) errors.push('Choose a registered PawPath veterinarian or clinic to review your application.');
-    if (errors.length) return res.status(400).render('verification', { title: 'Apply for verification | PawPath', errors, values: b, vets });
-    const existing = await get('SELECT id, proof_document FROM verification_applications WHERE user_id=?', [req.session.user.id]);
-    const values = [b.applicant_type,b.full_name.trim(),b.phone.replace(/\s/g,''),b.address.trim(),b.government_id_type,b.government_id_reference.trim(),selectedVet.username,String(selectedVet.organisation_name || selectedVet.username),String(selectedVet.phone || 'Contact through PawPath'),b.residence_proof_reference.trim(),b.pet_experience.trim(),b.household_consent,b.home_visit_consent,b.welfare_commitment];
+    const directoryVets = await all("SELECT id,name,city,state,email,phone_primary FROM directory_entries WHERE category='vets' ORDER BY name");
+    const selectedVet = b.selected_vet_user_id ? vets.find((vet) => Number(vet.id) === Number(b.selected_vet_user_id)) : null;
+    const selectedDirectoryVet = b.selected_vet_directory_id ? directoryVets.find((vet) => Number(vet.id) === Number(b.selected_vet_directory_id)) : null;
+    if (b.selected_vet_user_id && !selectedVet) errors.push('Choose a verified PawPath veterinarian.');
+    if (b.selected_vet_directory_id && !selectedDirectoryVet) errors.push('Choose a valid listed veterinarian.');
+    if (errors.length) return res.status(400).render('verification', { title: 'Apply for verification | PawPath', errors, values: b, vets, directoryVets });
+    const existing = await get('SELECT id,proof_document,referral_token FROM verification_applications WHERE user_id=?', [req.session.user.id]);
+    const vetName = selectedVet?.username || selectedDirectoryVet.name;
+    const vetClinic = selectedVet?.organisation_name || selectedDirectoryVet.name;
+    const vetContact = selectedVet?.phone || selectedDirectoryVet.phone_primary || selectedDirectoryVet.email || 'Share the secure referral link';
+    const values = [b.applicant_type,b.full_name.trim(),b.phone.replace(/\s/g,''),b.address.trim(),b.government_id_type,b.government_id_reference.trim(),vetName,String(vetClinic),String(vetContact),b.residence_proof_reference.trim(),b.pet_experience.trim(),b.household_consent,b.home_visit_consent,b.welfare_commitment];
     const document = proofFromRequest(req, existing?.proof_document || '');
-    if (existing) await run(`UPDATE verification_applications SET applicant_type=?,full_name=?,phone=?,address=?,government_id_type=?,government_id_reference=?,veterinarian_name=?,veterinarian_clinic=?,veterinarian_contact=?,residence_proof_reference=?,pet_experience=?,household_consent=?,home_visit_consent=?,welfare_commitment=?,proof_document=?,selected_vet_user_id=?,reviewed_by_user_id=NULL,status='Under review',updated_at=CURRENT_TIMESTAMP WHERE user_id=?`, [...values, document, selectedVet.id, req.session.user.id]);
-    else await run(`INSERT INTO verification_applications (user_id,applicant_type,full_name,phone,address,government_id_type,government_id_reference,veterinarian_name,veterinarian_clinic,veterinarian_contact,residence_proof_reference,pet_experience,household_consent,home_visit_consent,welfare_commitment,proof_document,selected_vet_user_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id, ...values, document, selectedVet.id]);
+    const referralToken = selectedDirectoryVet ? (existing?.referral_token || crypto.randomBytes(24).toString('hex')) : null;
+    const status = selectedDirectoryVet ? 'Awaiting vet claim' : 'Under review';
+    if (existing) await run(`UPDATE verification_applications SET applicant_type=?,full_name=?,phone=?,address=?,government_id_type=?,government_id_reference=?,veterinarian_name=?,veterinarian_clinic=?,veterinarian_contact=?,residence_proof_reference=?,pet_experience=?,household_consent=?,home_visit_consent=?,welfare_commitment=?,proof_document=?,selected_vet_user_id=?,selected_vet_directory_id=?,referral_token=?,reviewed_by_user_id=NULL,status=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?`, [...values,document,selectedVet?.id || null,selectedDirectoryVet?.id || null,referralToken,status,req.session.user.id]);
+    else await run(`INSERT INTO verification_applications (user_id,applicant_type,full_name,phone,address,government_id_type,government_id_reference,veterinarian_name,veterinarian_clinic,veterinarian_contact,residence_proof_reference,pet_experience,household_consent,home_visit_consent,welfare_commitment,proof_document,selected_vet_user_id,selected_vet_directory_id,referral_token,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [req.session.user.id,...values,document,selectedVet?.id || null,selectedDirectoryVet?.id || null,referralToken,status]);
     await run("UPDATE users SET verification_status='Under review' WHERE id=?", [req.session.user.id]);
     req.session.user.verification_status = 'Under review';
-    await createNotification(selectedVet.id, `vet-review-${req.session.user.id}-${Date.now()}`, 'verification', 'New verification request', `${req.session.user.username} selected you to review their verification.`, '/vet/verifications');
-    pushLive(selectedVet.id, 'notification', { title: 'New verification request', body: `${req.session.user.username} selected you as their reviewing vet.`, url: '/vet/verifications' });
-    flash(req, 'success', `Verification sent to ${selectedVet.username}. You will be verified automatically if they approve it.`);
+    if (selectedVet) { await createNotification(selectedVet.id, `vet-review-${req.session.user.id}-${Date.now()}`, 'verification', 'New verification request', `${req.session.user.username} selected you to review their verification.`, '/vet/verifications'); pushLive(selectedVet.id, 'notification', { title: 'New verification request', body: `${req.session.user.username} selected you as their reviewing vet.`, url: '/vet/verifications' }); }
+    flash(req, 'success', selectedDirectoryVet ? `Referral link created for ${selectedDirectoryVet.name}. Copy it from your dashboard and send it to the vet.` : `Verification sent to ${selectedVet.username}. You will be verified automatically if they approve it.`);
     res.redirect('/dashboard');
+  } catch (error) { next(error); }
+});
+
+app.get('/vet-referral/:token', async (req, res, next) => {
+  try {
+    const referral = await get(`SELECT verification_applications.id,verification_applications.status,verification_applications.full_name,verification_applications.selected_vet_directory_id,directory_entries.name AS vet_name,directory_entries.city,directory_entries.state FROM verification_applications JOIN directory_entries ON directory_entries.id=verification_applications.selected_vet_directory_id WHERE verification_applications.referral_token=?`, [req.params.token]);
+    if (!referral) return res.status(404).render('error', { title: 'Referral not found | PawPath', message: 'This veterinarian referral link is invalid or no longer available.' });
+    const viewer = req.session.user ? await get('SELECT id,username,entity_type,verification_status,vet_certificate_status FROM users WHERE id=?', [req.session.user.id]) : null;
+    res.render('vet-referral', { title: `Referral for ${referral.vet_name} | PawPath`, referral, viewer, token: req.params.token });
+  } catch (error) { next(error); }
+});
+
+app.post('/vet-referral/:token/claim', requireLogin, async (req, res, next) => {
+  try {
+    const vet = await get('SELECT * FROM users WHERE id=?', [req.session.user.id]);
+    const referral = await get('SELECT * FROM verification_applications WHERE referral_token=?', [req.params.token]);
+    if (!referral) return res.redirect('/dashboard');
+    if (vet?.entity_type !== 'Veterinarian / vet clinic' || vet?.verification_status !== 'Verified') { flash(req, 'error', 'Create a veterinarian account and complete professional credential verification before claiming this referral.'); return res.redirect(`/vet-referral/${req.params.token}`); }
+    await run("UPDATE verification_applications SET selected_vet_user_id=?,status='Under review',updated_at=CURRENT_TIMESTAMP WHERE id=?", [vet.id, referral.id]);
+    await createNotification(referral.user_id, `referral-claimed-${referral.id}`, 'verification', 'Your veterinarian claimed the referral', `${vet.username} can now review your verification application.`, '/dashboard');
+    pushLive(referral.user_id, 'notification', { title: 'Veterinarian referral claimed', body: `${vet.username} can now review your application.`, url: '/dashboard' });
+    flash(req, 'success', 'Referral claimed. The volunteer request is now in your verification queue.'); res.redirect('/vet/verifications');
   } catch (error) { next(error); }
 });
 
@@ -1008,7 +1045,39 @@ app.post('/admin/verifications/:id/decision', requireLogin, requireAdmin, async 
   } catch (error) { next(error); }
 });
 
+app.get('/complaints/new', requireLogin, async (req, res, next) => {
+  try {
+    const reporter = await get('SELECT id,verification_status FROM users WHERE id=?', [req.session.user.id]);
+    if (reporter?.verification_status !== 'Verified') { flash(req, 'error', 'Only verified PawPath members can file accountability complaints.'); return res.redirect(req.get('referer') || '/dashboard'); }
+    const targetUser = req.query.user_id ? await get('SELECT id,username AS name,entity_type AS type FROM users WHERE id=?', [req.query.user_id]) : null;
+    const targetDirectory = req.query.directory_id ? await get('SELECT id,name,category AS type FROM directory_entries WHERE id=?', [req.query.directory_id]) : null;
+    const animal = req.query.animal_id ? await get('SELECT id,name FROM animals WHERE id=?', [req.query.animal_id]) : null;
+    if ((!targetUser && !targetDirectory) || (targetUser && targetUser.id === reporter.id)) { flash(req, 'error', 'Choose a valid person, clinic, shelter or organisation to report.'); return res.redirect('/profiles'); }
+    res.render('complaint-form', { title: 'File an accountability complaint | PawPath', target: targetUser || targetDirectory, targetUser, targetDirectory, animal, errors: [], values: {} });
+  } catch (error) { next(error); }
+});
+
+app.post('/complaints', requireLogin, async (req, res, next) => {
+  try {
+    const reporter = await get('SELECT id,verification_status FROM users WHERE id=?', [req.session.user.id]);
+    if (reporter?.verification_status !== 'Verified') { flash(req, 'error', 'Only verified PawPath members can file accountability complaints.'); return res.redirect('/dashboard'); }
+    const targetUser = req.body.target_user_id ? await get('SELECT id,username AS name,entity_type AS type FROM users WHERE id=?', [req.body.target_user_id]) : null;
+    const targetDirectory = req.body.target_directory_id ? await get('SELECT id,name,category AS type FROM directory_entries WHERE id=?', [req.body.target_directory_id]) : null;
+    const animal = req.body.animal_id ? await get('SELECT id,name FROM animals WHERE id=?', [req.body.animal_id]) : null;
+    const categories = ['Did not provide promised help','Animal welfare concern','Misleading identity or credentials','Unsafe conduct','Payment or fundraising concern','Other'];
+    const errors = [];
+    if ((!targetUser && !targetDirectory) || (targetUser && targetUser.id === reporter.id)) errors.push('Choose a valid report target.');
+    if (!categories.includes(req.body.category)) errors.push('Choose a complaint category.');
+    if (String(req.body.description || '').trim().length < 40) errors.push('Describe what happened in at least 40 characters.');
+    if (errors.length) return res.status(400).render('complaint-form', { title: 'File an accountability complaint | PawPath', target: targetUser || targetDirectory || { name: 'Unknown record' }, targetUser, targetDirectory, animal, errors, values: req.body });
+    const result = await run('INSERT INTO complaints (reporter_user_id,target_user_id,target_directory_id,animal_id,category,description,evidence_reference) VALUES (?,?,?,?,?,?,?)', [reporter.id,targetUser?.id || null,targetDirectory?.id || null,animal?.id || null,req.body.category,String(req.body.description).trim(),String(req.body.evidence_reference || '').trim()]);
+    if (targetUser) await createNotification(targetUser.id, `complaint-${result.id}`, 'accountability', 'An accountability complaint was filed', 'A verified member filed a complaint. It is recorded for review; repeated unresolved reports may add a public caution.', '/dashboard');
+    flash(req, 'success', 'Complaint recorded for review. A public caution appears only after reports from three distinct verified members.');
+    res.redirect(targetUser ? `/profiles/${targetUser.id}` : `/directory/${targetDirectory.id}`);
+  } catch (error) { next(error); }
+});
+
 app.use((req, res) => res.status(404).render('error', { title: 'Page not found | PawPath', message: 'This path does not exist. Let’s get you back to helping animals.' }));
 app.use((error, req, res, next) => { console.error(error); const message = error.code === 'LIMIT_FILE_SIZE' ? 'Please choose a photo smaller than 4 MB.' : error.message === 'Please choose an image file.' ? error.message : 'Please try again. If the issue continues, restart the local server.'; res.status(500).render('error', { title: 'Something went wrong | PawPath', message }); });
 
-initialiseDatabase().then(seedHappyTails).then(() => app.listen(PORT, () => console.log(`PawPath is running at http://localhost:${PORT}`)));
+initialiseDatabase().then(() => app.listen(PORT, () => console.log(`PawPath is running at http://localhost:${PORT}`)));

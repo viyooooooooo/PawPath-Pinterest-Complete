@@ -7,6 +7,7 @@
     <div><span class="trust-badge trust-<%= entry.trust_status.replaceAll('_','-') %>"><%= trustLabel %></span><h1><%= entry.name %></h1><p class="profile-role"><%= String(entry.subtype || '').replaceAll('_',' ') %> · <%= [entry.city, entry.state].filter(Boolean).join(', ') || 'Location not listed' %></p><% if (entry.awbi_code) { %><p class="directory-code">AWBI code <strong><%= entry.awbi_code %></strong></p><% } %></div>
   </div>
 </section>
+<% if (complaintReporters >= 3) { %><aside class="accountability-warning"><strong>⚠ Repeated unresolved concerns reported</strong><p><%= complaintReporters %> distinct verified PawPath members have filed active complaints about this record. This is a caution, not a finding of guilt—confirm services and commitments independently.</p></aside><% } %>
 
 <section class="directory-detail-grid section">
   <article class="directory-detail-card">
@@ -24,10 +25,13 @@
       <% if (entry.phone_primary) { %><a href="tel:<%= entry.phone_primary %>"><span>Primary phone</span><strong><%= entry.phone_primary %></strong></a><% } %>
       <% if (entry.phone_secondary) { String(entry.phone_secondary).split(';').filter(Boolean).forEach(phone => { %><a href="tel:<%= phone.trim() %>"><span>Additional phone</span><strong><%= phone.trim() %></strong></a><% }) } %>
       <% if (entry.email) { %><a href="mailto:<%= entry.email %>"><span>Email</span><strong><%= entry.email %></strong></a><% } %>
-      <% if (!entry.phone_primary && !entry.phone_secondary && !entry.email) { %><p class="muted">No public phone or email was present in the supplied source.</p><% } %>
+      <% if (entry.website) { %><a href="<%= entry.website %>" target="_blank" rel="noopener"><span>Website</span><strong>Open public website ↗</strong></a><% } %>
+      <% if (!entry.phone_primary && !entry.phone_secondary && !entry.email && !entry.website) { %><p class="muted">No public contact was present in the supplied source. PawPath does not invent contact details.</p><% } %>
     </div>
     <% if (entry.source_url) { %><a class="button button-soft" href="<%= entry.source_url %>" target="_blank" rel="noopener">Open original source ↗</a><% } %>
     <% if (entry.source_checked_on) { %><small>Source date: <%= entry.source_checked_on %></small><% } %>
+    <% if (currentUser && currentUser.verification_status === 'Verified') { %><a class="text-link danger-link" href="/complaints/new?directory_id=<%= entry.id %>">Report a concern →</a><% } %>
+    <% if (entry.category === 'vets' && currentUser) { %><a class="button referral-button" href="/verification/apply?directory_vet_id=<%= entry.id %>">Ask this vet to verify me →</a><% } %>
   </aside>
 </section>
 <%- include('partials/footer') %>

@@ -1,0 +1,13 @@
+<%- include('partials/header') %>
+<section class="form-page wide-form complaint-page"><div class="form-intro"><span class="kicker">ACCOUNTABILITY</span><h1>Report a broken commitment.</h1><p>Verified members can report a person, clinic, shelter or organisation. Reports are recorded for review; PawPath never treats one allegation as proven fact.</p></div>
+<form class="main-form" method="post" action="/complaints">
+  <% if (errors.length) { %><div class="form-errors"><ul><% errors.forEach(error => { %><li><%= error %></li><% }) %></ul></div><% } %>
+  <input type="hidden" name="target_user_id" value="<%= targetUser?.id || '' %>"><input type="hidden" name="target_directory_id" value="<%= targetDirectory?.id || '' %>"><input type="hidden" name="animal_id" value="<%= animal?.id || '' %>">
+  <div class="complaint-target"><span>REPORTING</span><h2><%= target.name %></h2><p><%= target.type || 'PawPath record' %><%= animal ? ` · connected to ${animal.name}` : '' %></p></div>
+  <label>What happened?<select name="category" required><option value="">Choose</option><% ['Did not provide promised help','Animal welfare concern','Misleading identity or credentials','Unsafe conduct','Payment or fundraising concern','Other'].forEach(item => { %><option <%= values.category===item?'selected':'' %>><%= item %></option><% }) %></select></label>
+  <label>Detailed account<textarea name="description" required minlength="40" rows="7" placeholder="What was promised, what happened, dates, messages and any steps you took to resolve it..."><%= values.description || '' %></textarea></label>
+  <label>Evidence reference <span class="optional-label">Optional</span><input name="evidence_reference" value="<%= values.evidence_reference || '' %>" placeholder="Private document link, conversation reference or case number"></label>
+  <div class="complaint-policy"><strong>How warnings work</strong><p>A warning is shown after unresolved complaints from at least three distinct verified members. Repeated submissions by one person do not increase the threshold. A warning describes reports—not guilt—and can be reviewed.</p></div>
+  <button class="button">Submit for review</button>
+</form></section>
+<%- include('partials/footer') %>

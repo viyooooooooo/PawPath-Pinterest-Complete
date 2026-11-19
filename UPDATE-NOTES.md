@@ -38,3 +38,12 @@ Existing PostgreSQL data is preserved. New columns are added automatically when 
 - The helped counter is calculated from distinct animals with accepted offers, so it updates automatically and cannot drift from the offer workflow.
 - `vyomika22sahay@gmail.com` is idempotently promoted to a verified veterinarian during database initialization and can review assigned volunteer applications.
 
+# Accountability, referrals and unified Happy Tails update
+
+- Opening a notification now marks it read and dismisses it immediately.
+- Happy Tails now uses the core PawPath cream/ink/green/red palette, an image-filled impact numeral, scroll zoom, and a one-at-a-time selectable story-card deck.
+- Added verified-member accountability complaints for profiles and source-backed directory records. Three distinct verified reporters trigger a clearly worded unresolved-concerns caution; one reporter cannot inflate the threshold.
+- Added secure directory-vet referrals: applicants can choose a public-directory vet, copy a tokenized link, and send it to the vet. The vet must create a veterinarian account and complete professional credential verification before claiming and reviewing the application.
+- Removed bundled `@pawpath.local` demo people and stopped creating fictional accounts, listings, or Happy Tail stories. User-created records and supplied public-directory records remain intact.
+- Added source-attributed supplemental organisation contact import support through `data/imports/organisation_contacts.csv`. The supplied AWBI file contains no phone/email fields, so missing contacts are not fabricated.
+

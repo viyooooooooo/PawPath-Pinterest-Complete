@@ -4,7 +4,7 @@ const { run, get, initialiseDatabase } = require('./database');
 const { parseCsv } = require('./data-utils');
 const { coordinatesForPlace } = require('./geo-utils');
 
-const SOURCE_VERSION = 'india-directory-2026-11-19-map-v2';
+const SOURCE_VERSION = 'india-directory-2026-11-19-contacts-v3';
 const IMPORT_DIRECTORY = path.join(__dirname, 'data', 'imports');
 
 function readCsv(filename) {
@@ -67,7 +67,11 @@ function veterinaryEntries() {
 }
 
 function organisationEntries() {
-  return readCsv('awbi_organisations.csv').map((row) => ({
+  const contactPath = path.join(IMPORT_DIRECTORY, 'organisation_contacts.csv');
+  const contacts = fs.existsSync(contactPath) ? readCsv('organisation_contacts.csv') : [];
+  const byCode = new Map(contacts.filter(row => row.awbi_code).map(row => [String(row.awbi_code).trim().toLowerCase(),row]));
+  const byName = new Map(contacts.filter(row => row.name).map(row => [String(row.name).trim().toLowerCase(),row]));
+  return readCsv('awbi_organisations.csv').map((row) => { const contact=byCode.get(String(row.awbi_code||'').trim().toLowerCase())||byName.get(String(row.name||'').trim().toLowerCase())||{}; return ({
     source_key: `awbi:${row.awbi_serial}`,
     category: 'organisations',
     name: row.name,
@@ -75,25 +79,26 @@ function organisationEntries() {
     city: row.district,
     state: row.state_normalized,
     address: row.address,
-    phone_primary: '',
-    phone_secondary: '',
-    email: '',
+    phone_primary: contact.phone_primary || '',
+    phone_secondary: contact.phone_secondary || '',
+    email: contact.email || '',
+    website: contact.website || '',
     services: 'Listed on the national AWBI register. Current dog, cat and stray-case services are not yet confirmed by PawPath.',
     notes: `Recognition: ${row.recognition_date_raw || 'Not stated'} · Renewal: ${row.renewal_date_raw || 'Not stated'} · Valid until: ${row.valid_upto_raw || 'Not stated'}`,
     trust_status: 'awbi_recognised',
-    source_url: row.source_url,
-    source_checked_on: '2026-03-31',
+    source_url: contact.source_url || row.source_url,
+    source_checked_on: contact.source_checked_on || '2026-03-31',
     awbi_code: row.awbi_code,
     listing_readiness: row.listing_readiness || 'needs_service_verification',
     accepts_dogs: nullableBoolean(row.accepts_dogs),
     accepts_cats: nullableBoolean(row.accepts_cats),
     accepts_stray_cases: nullableBoolean(row.accepts_stray_cases)
-  }));
+  }); });
 }
 
 const columns = [
   'source_key', 'category', 'name', 'subtype', 'city', 'state', 'address',
-  'phone_primary', 'phone_secondary', 'email', 'services', 'notes', 'trust_status',
+  'phone_primary', 'phone_secondary', 'email', 'website', 'services', 'notes', 'trust_status',
   'source_url', 'source_checked_on', 'awbi_code', 'listing_readiness',
   'accepts_dogs', 'accepts_cats', 'accepts_stray_cases',
   'latitude', 'longitude', 'location_accuracy'
@@ -113,6 +118,7 @@ async function upsertBatch(entries) {
       phone_primary=EXCLUDED.phone_primary,
       phone_secondary=EXCLUDED.phone_secondary,
       email=EXCLUDED.email,
+      website=EXCLUDED.website,
       services=EXCLUDED.services,
       notes=EXCLUDED.notes,
       trust_status=EXCLUDED.trust_status,

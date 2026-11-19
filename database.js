@@ -150,6 +150,7 @@ async function initialiseDatabase() {
     phone_primary TEXT,
     phone_secondary TEXT,
     email TEXT,
+    website TEXT,
     services TEXT,
     notes TEXT,
     trust_status TEXT NOT NULL DEFAULT 'source_listed',
@@ -172,6 +173,7 @@ async function initialiseDatabase() {
   await addColumn('directory_entries', 'latitude REAL');
   await addColumn('directory_entries', 'longitude REAL');
   await addColumn('directory_entries', 'location_accuracy TEXT');
+  await addColumn('directory_entries', 'website TEXT');
 
   await run(`CREATE TABLE IF NOT EXISTS directory_imports (
     source_version TEXT PRIMARY KEY,
@@ -241,6 +243,29 @@ async function initialiseDatabase() {
   await addColumn('verification_applications', 'proof_document TEXT');
   await addColumn('verification_applications', 'selected_vet_user_id INTEGER');
   await addColumn('verification_applications', 'reviewed_by_user_id INTEGER');
+  await addColumn('verification_applications', 'selected_vet_directory_id INTEGER');
+  await addColumn('verification_applications', 'referral_token TEXT');
+  await run('CREATE UNIQUE INDEX IF NOT EXISTS idx_verification_referral_token ON verification_applications (referral_token)');
+
+  await run(`CREATE TABLE IF NOT EXISTS complaints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reporter_user_id INTEGER NOT NULL,
+    target_user_id INTEGER,
+    target_directory_id INTEGER,
+    animal_id INTEGER,
+    category TEXT NOT NULL,
+    description TEXT NOT NULL,
+    evidence_reference TEXT,
+    status TEXT NOT NULL DEFAULT 'Submitted',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (reporter_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_directory_id) REFERENCES directory_entries(id) ON DELETE CASCADE,
+    FOREIGN KEY (animal_id) REFERENCES animals(id) ON DELETE SET NULL
+  )`);
+  await run('CREATE INDEX IF NOT EXISTS idx_complaints_target_user ON complaints (target_user_id,status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_complaints_target_directory ON complaints (target_directory_id,status)');
 
   await run(`CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -311,6 +336,10 @@ async function initialiseDatabase() {
     verification_status='Verified', verified_at=COALESCE(verified_at,?),
     vet_certificate_status='Approved', vet_certificate_notes=COALESCE(NULLIF(vet_certificate_notes,''),'Approved verified veterinarian account')
     WHERE LOWER(email)='vyomika22sahay@gmail.com'`, [new Date().toISOString()]);
+  // Remove only the old bundled demo identities. Real sign-ups and imported
+  // public directory records are not touched.
+  await run("DELETE FROM users WHERE LOWER(email) LIKE '%@pawpath.local'");
+  await run('DELETE FROM happy_tails WHERE user_id IS NULL OR animal_id IS NULL');
   await allowGeneralConversations();
   // The SQLite compatibility rebuild above can replace the conversations table.
   // Re-assert these columns afterwards so upgrades from every older schema work.
