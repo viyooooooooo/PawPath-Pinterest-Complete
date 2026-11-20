@@ -725,11 +725,11 @@ app.get('/offers/:id', requireLogin, async (req, res, next) => {
       FROM applications JOIN animals ON animals.id=applications.animal_id
       JOIN users AS applicants ON applicants.id=applications.user_id JOIN users AS owners ON owners.id=animals.user_id
       WHERE applications.id=?`, [req.params.id]);
-    if (!offer || (offer.user_id !== req.session.user.id && offer.listing_owner_id !== req.session.user.id)) {
+    if (!offer || (offer.user_id !== req.session.user.id && offer.listing_owner_id !== req.session.user.id && !req.session.user.is_admin)) {
       flash(req, 'error', 'That offer is not available to you.'); return res.redirect('/dashboard');
     }
     await run('UPDATE notifications SET is_read=1 WHERE user_id=? AND url=?', [req.session.user.id, `/offers/${offer.id}`]);
-    const verification = offer.share_verification || offer.user_id === req.session.user.id
+    const verification = offer.share_verification || offer.user_id === req.session.user.id || req.session.user.is_admin
       ? await get('SELECT applicant_type,government_id_type,government_id_reference,veterinarian_name,veterinarian_clinic,veterinarian_contact,residence_proof_reference,pet_experience,status,proof_document FROM verification_applications WHERE user_id=?', [offer.user_id])
       : null;
     if (verification) verification.masked_government_id = maskedReference(verification.government_id_reference);
@@ -946,6 +946,159 @@ app.post('/vet/certificate', requireLogin, proofUpload.single('verification_docu
   } catch (error) { next(error); }
 });
 
+app.get('/admin', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const [users, listings, directory, complaints, verifications, vets, stories, offers] = await Promise.all([
+      get('SELECT COUNT(*) AS count FROM users'),
+      get('SELECT COUNT(*) AS count FROM animals'),
+      get('SELECT COUNT(*) AS count FROM directory_entries'),
+      get("SELECT COUNT(*) AS count FROM complaints WHERE status IN ('Submitted','Under review','Substantiated')"),
+      get('SELECT COUNT(*) AS count FROM verification_applications'),
+      get("SELECT COUNT(*) AS count FROM users WHERE entity_type='Veterinarian / vet clinic'"),
+      get('SELECT COUNT(*) AS count FROM happy_tails'),
+      get('SELECT COUNT(*) AS count FROM applications')
+    ]);
+    const recentComplaints = await all(`SELECT complaints.*,reporter.username AS reporter_name,
+      target_user.username AS target_user_name,directory_entries.name AS target_directory_name,animals.name AS animal_name
+      FROM complaints JOIN users AS reporter ON reporter.id=complaints.reporter_user_id
+      LEFT JOIN users AS target_user ON target_user.id=complaints.target_user_id
+      LEFT JOIN directory_entries ON directory_entries.id=complaints.target_directory_id
+      LEFT JOIN animals ON animals.id=complaints.animal_id
+      ORDER BY complaints.created_at DESC LIMIT 8`);
+    res.render('admin-dashboard', { title: 'Admin control centre | PawPath', counts: {
+      users: users.count, listings: listings.count, directory: directory.count,
+      complaints: complaints.count, verifications: verifications.count, vets: vets.count,
+      stories: stories.count, offers: offers.count
+    }, recentComplaints });
+  } catch (error) { next(error); }
+});
+
+app.get('/admin/users', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const users = await all(`SELECT users.*,COUNT(DISTINCT animals.id) AS listing_count,
+      COUNT(DISTINCT complaints.id) AS complaint_count
+      FROM users LEFT JOIN animals ON animals.user_id=users.id
+      LEFT JOIN complaints ON complaints.target_user_id=users.id
+      GROUP BY users.id ORDER BY users.is_admin DESC,users.created_at DESC`);
+    res.render('admin-users', { title: 'Manage people | PawPath', users });
+  } catch (error) { next(error); }
+});
+
+app.get('/admin/listings', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const listings = await all(`SELECT animals.*,users.username,users.email,
+      COUNT(DISTINCT applications.id) AS offer_count,COUNT(DISTINCT complaints.id) AS complaint_count
+      FROM animals JOIN users ON users.id=animals.user_id
+      LEFT JOIN applications ON applications.animal_id=animals.id
+      LEFT JOIN complaints ON complaints.animal_id=animals.id
+      GROUP BY animals.id,users.username,users.email ORDER BY animals.created_at DESC`);
+    res.render('admin-listings', { title: 'Manage listings | PawPath', listings });
+  } catch (error) { next(error); }
+});
+
+app.get('/admin/directory', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const query = String(req.query.q || '').trim();
+    const category = ['volunteers','vets','organisations'].includes(req.query.category) ? req.query.category : '';
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const pageSize = 60;
+    const filters = []; const params = [];
+    if (query) { filters.push('(LOWER(directory_entries.name) LIKE ? OR LOWER(COALESCE(directory_entries.city,\'\')) LIKE ? OR LOWER(COALESCE(directory_entries.state,\'\')) LIKE ?)'); const term = `%${query.toLowerCase()}%`; params.push(term,term,term); }
+    if (category) { filters.push('directory_entries.category=?'); params.push(category); }
+    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    const total = await get(`SELECT COUNT(*) AS count FROM directory_entries ${where}`, params);
+    const entries = await all(`SELECT directory_entries.*,COUNT(DISTINCT complaints.id) AS complaint_count
+      FROM directory_entries LEFT JOIN complaints ON complaints.target_directory_id=directory_entries.id
+      ${where} GROUP BY directory_entries.id ORDER BY directory_entries.name LIMIT ? OFFSET ?`, [...params,pageSize,(page-1)*pageSize]);
+    res.render('admin-directory', { title: 'Manage public directory | PawPath', entries, query, category, page, pages: Math.max(1,Math.ceil(Number(total.count || 0)/pageSize)), total: Number(total.count || 0) });
+  } catch (error) { next(error); }
+});
+
+app.get('/admin/complaints', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const complaints = await all(`SELECT complaints.*,reporter.username AS reporter_name,reporter.email AS reporter_email,
+      target_user.username AS target_user_name,target_user.email AS target_user_email,
+      directory_entries.name AS target_directory_name,animals.name AS animal_name
+      FROM complaints JOIN users AS reporter ON reporter.id=complaints.reporter_user_id
+      LEFT JOIN users AS target_user ON target_user.id=complaints.target_user_id
+      LEFT JOIN directory_entries ON directory_entries.id=complaints.target_directory_id
+      LEFT JOIN animals ON animals.id=complaints.animal_id ORDER BY complaints.created_at DESC`);
+    res.render('admin-complaints', { title: 'Warnings and complaints | PawPath', complaints });
+  } catch (error) { next(error); }
+});
+
+app.get('/admin/happy-tails', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const stories = await all(`SELECT happy_tails.*,users.username,users.email,animals.name AS animal_name
+      FROM happy_tails LEFT JOIN users ON users.id=happy_tails.user_id
+      LEFT JOIN animals ON animals.id=happy_tails.animal_id ORDER BY happy_tails.created_at DESC`);
+    res.render('admin-happy-tails', { title: 'Manage Happy Tails | PawPath', stories });
+  } catch (error) { next(error); }
+});
+
+app.get('/admin/offers', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const offers = await all(`SELECT applications.*,animals.name AS animal_name,
+      applicant.username AS applicant_name,applicant.email AS applicant_email,
+      owner.username AS owner_name,owner.email AS owner_email
+      FROM applications JOIN animals ON animals.id=applications.animal_id
+      JOIN users AS applicant ON applicant.id=applications.user_id
+      JOIN users AS owner ON owner.id=animals.user_id
+      ORDER BY applications.created_at DESC`);
+    res.render('admin-offers', { title: 'Offers and approvals | PawPath', offers });
+  } catch (error) { next(error); }
+});
+
+app.post('/admin/users/:id/delete', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const user = await get('SELECT id,username,is_admin FROM users WHERE id=?', [req.params.id]);
+    if (!user) { flash(req, 'error', 'That account no longer exists.'); return res.redirect('/admin/users'); }
+    if (Number(user.id) === Number(req.session.user.id) || Number(user.is_admin) === 1) { flash(req, 'error', 'Admin accounts cannot be deleted from this screen.'); return res.redirect('/admin/users'); }
+    await run("UPDATE verification_applications SET selected_vet_user_id=NULL,status=CASE WHEN status='Under review' THEN 'Awaiting vet claim' ELSE status END WHERE selected_vet_user_id=?", [user.id]);
+    await run('UPDATE verification_applications SET reviewed_by_user_id=NULL WHERE reviewed_by_user_id=?', [user.id]);
+    await run('DELETE FROM happy_tails WHERE user_id=?', [user.id]);
+    await run('DELETE FROM users WHERE id=?', [user.id]);
+    flash(req, 'success', `${user.username}'s account and connected listings were deleted.`); res.redirect('/admin/users');
+  } catch (error) { next(error); }
+});
+
+app.post('/admin/listings/:id/delete', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const listing = await get('SELECT id,name FROM animals WHERE id=?', [req.params.id]);
+    if (!listing) { flash(req, 'error', 'That listing no longer exists.'); return res.redirect('/admin/listings'); }
+    await run('DELETE FROM animals WHERE id=?', [listing.id]);
+    flash(req, 'success', `${listing.name}'s listing was deleted by the administrator.`); res.redirect('/admin/listings');
+  } catch (error) { next(error); }
+});
+
+app.post('/admin/directory/:id/delete', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const entry = await get('SELECT id,name FROM directory_entries WHERE id=?', [req.params.id]);
+    if (!entry) { flash(req, 'error', 'That directory record no longer exists.'); return res.redirect('/admin/directory'); }
+    await run("UPDATE verification_applications SET selected_vet_directory_id=NULL,status=CASE WHEN status IN ('Under review','Awaiting vet claim') THEN 'Awaiting vet claim' ELSE status END WHERE selected_vet_directory_id=?", [entry.id]);
+    await run('DELETE FROM directory_entries WHERE id=?', [entry.id]);
+    flash(req, 'success', `${entry.name} was removed from the public directory.`); res.redirect('/admin/directory');
+  } catch (error) { next(error); }
+});
+
+app.post('/admin/complaints/:id/status', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const statuses = ['Submitted','Under review','Substantiated','Resolved','Dismissed'];
+    if (!statuses.includes(req.body.status)) { flash(req, 'error', 'Choose a valid complaint status.'); return res.redirect('/admin/complaints'); }
+    await run('UPDATE complaints SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [req.body.status,req.params.id]);
+    flash(req, 'success', 'Complaint status updated.'); res.redirect('/admin/complaints');
+  } catch (error) { next(error); }
+});
+
+app.post('/admin/happy-tails/:id/delete', requireLogin, requireAdmin, async (req, res, next) => {
+  try {
+    const story = await get('SELECT id,dog_name FROM happy_tails WHERE id=?', [req.params.id]);
+    if (!story) { flash(req, 'error', 'That Happy Tail no longer exists.'); return res.redirect('/admin/happy-tails'); }
+    await run('DELETE FROM happy_tails WHERE id=?', [story.id]);
+    flash(req, 'success', `${story.dog_name}'s Happy Tail was deleted by the administrator.`); res.redirect('/admin/happy-tails');
+  } catch (error) { next(error); }
+});
+
 app.get('/admin/vets', requireLogin, requireAdmin, async (req, res, next) => {
   try {
     const vets = await all("SELECT * FROM users WHERE entity_type='Veterinarian / vet clinic' ORDER BY CASE vet_certificate_status WHEN 'Under review' THEN 1 WHEN 'Not submitted' THEN 2 ELSE 3 END,username");
@@ -1057,21 +1210,21 @@ app.post('/vet/verifications/:id/decision', requireLogin, async (req, res, next)
 
 app.get('/admin/verifications', requireLogin, requireAdmin, async (req, res, next) => {
   try {
-    const applications = await all(`SELECT verification_applications.*, users.username, users.email, users.profile_photo FROM verification_applications JOIN users ON users.id=verification_applications.user_id ORDER BY CASE verification_applications.status WHEN 'Under review' THEN 1 ELSE 2 END, verification_applications.created_at DESC`);
+    const applications = await all(`SELECT verification_applications.*,users.username,users.email,users.profile_photo,
+      selected_vet.username AS selected_vet_name,reviewing_vet.username AS reviewing_vet_name,
+      directory_entries.name AS selected_directory_vet_name
+      FROM verification_applications JOIN users ON users.id=verification_applications.user_id
+      LEFT JOIN users AS selected_vet ON selected_vet.id=verification_applications.selected_vet_user_id
+      LEFT JOIN users AS reviewing_vet ON reviewing_vet.id=verification_applications.reviewed_by_user_id
+      LEFT JOIN directory_entries ON directory_entries.id=verification_applications.selected_vet_directory_id
+      ORDER BY CASE verification_applications.status WHEN 'Under review' THEN 1 ELSE 2 END,verification_applications.created_at DESC`);
     res.render('admin-verifications', { title: 'Verification review | PawPath', applications });
   } catch (error) { next(error); }
 });
 
 app.post('/admin/verifications/:id/decision', requireLogin, requireAdmin, async (req, res, next) => {
-  try {
-    const application = await get('SELECT * FROM verification_applications WHERE id=?', [req.params.id]);
-    if (!application) return res.redirect('/admin/verifications');
-    const status = req.body.decision === 'approve' ? 'Approved' : 'Rejected';
-    await run('UPDATE verification_applications SET status=?,reviewer_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [status, String(req.body.reviewer_notes || '').trim(), application.id]);
-    await run('UPDATE users SET verification_status=?,verified_at=? WHERE id=?', [status === 'Approved' ? 'Verified' : 'Unverified', status === 'Approved' ? new Date().toISOString() : null, application.user_id]);
-    flash(req, 'success', `Verification ${status.toLowerCase()}.`);
-    res.redirect('/admin/verifications');
-  } catch (error) { next(error); }
+  flash(req, 'error', 'Member verification decisions are made only by the verified veterinarian selected by the member. Admin access is view-only.');
+  res.redirect('/admin/verifications');
 });
 
 app.get('/complaints/new', requireLogin, async (req, res, next) => {

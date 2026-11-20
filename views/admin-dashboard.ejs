@@ -1,0 +1,12 @@
+<%- include('partials/header') %>
+<%- include('partials/admin-nav') %>
+<section class="page-heading admin-heading"><h1>Admin control centre</h1><p>One place to moderate PawPath records, review safety reports and inspect verification activity.</p></section>
+<section class="section admin-stat-grid">
+  <% [['People',counts.users,'/admin/users'],['Animal listings',counts.listings,'/admin/listings'],['Clinics & organisations',counts.directory,'/admin/directory'],['Active warnings',counts.complaints,'/admin/complaints'],['Member verifications',counts.verifications,'/admin/verifications'],['Vet accounts',counts.vets,'/admin/vets'],['Happy Tales',counts.stories,'/admin/happy-tails'],['Offers sent',counts.offers,'/admin/offers']].forEach(item => { %>
+    <a href="<%= item[2] %>"><strong><%= item[1] %></strong><span><%= item[0] %></span><b>Manage →</b></a>
+  <% }) %>
+</section>
+<section class="section admin-section"><div class="section-heading"><div><h2>Recent warnings and complaints</h2><p>Allegations remain unproven until reviewed.</p></div><a class="text-link" href="/admin/complaints">See all →</a></div>
+  <% if (recentComplaints.length) { %><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Target</th><th>Reported by</th><th>Category</th><th>Status</th><th>Date</th></tr></thead><tbody><% recentComplaints.forEach(item => { %><tr><td><%= item.target_user_name || item.target_directory_name || 'Removed record' %></td><td><%= item.reporter_name %></td><td><%= item.category %></td><td><span class="admin-status"><%= item.status %></span></td><td><%= new Date(item.created_at).toLocaleDateString() %></td></tr><% }) %></tbody></table></div><% } else { %><div class="empty-state">No complaints have been submitted.</div><% } %>
+</section>
+<%- include('partials/footer') %>
