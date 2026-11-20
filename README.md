@@ -25,9 +25,9 @@ npm install
 npm start
 ```
 
-Open `http://localhost:3000`. Demo password for seeded profiles: `PawPath123`.
+Open `http://localhost:3000`.
 
-Reviewer demo account: `aarohi@pawpath.local` / `PawPath123`. Its dashboard links to the verification review queue.
+Admin account: `admin@pawpath.in` / `PawPathAdmin2026!`. The account is created automatically at startup and its dashboard links to the verification review queues. A production deployment may override these defaults with the `PAWPATH_ADMIN_EMAIL`, `PAWPATH_ADMIN_PASSWORD`, and `PAWPATH_ADMIN_USERNAME` environment variables.
 
 The first `npm start` imports the India directory. Later starts skip the import unless the source version changes, so deployments do not create duplicate records. PawPath user accounts, listings, applications and messages remain separate from imported public directory entries.
 
